@@ -138,7 +138,7 @@ The dashboard features custom CSS for:
 
 2. **Installation**:
    ```bash
-   pip install streamlit pandas plotly
+   pip install -r requirements.text
    ```
 
 3. **Data Preparation**:
