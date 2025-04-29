@@ -2,14 +2,91 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
 
-# Load data
+# Set page config
+st.set_page_config(
+    page_title="Transport Analytics Dashboard",
+    page_icon="🚍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+<style>
+    /* Main containers */
+    .main-container {
+        padding: 2rem;
+    }
+    
+    /* Metric cards */
+    .metric-card {
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        padding: 1.5rem;
+        border-left: 4px solid #4e73df;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 1.5rem;
+        height: 120px;
+    }
+    .metric-title {
+        color: #5a5c69;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.5rem;
+    }
+    .metric-value {
+        color: #2e59a9;
+        font-size: 1.8rem;
+        font-weight: 700;
+        font-family: 'Arial', sans-serif;
+    }
+    
+    /* Insight cards */
+    .insight-card {
+        background-color: #f0f8ff;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 3px solid #4e73df;
+    }
+    .warning-card {
+        background-color: #fff0f0;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 3px solid #e74a3b;
+    }
+    
+    /* Filters */
+    .stMultiSelect [data-baseweb=select] span{
+        max-width: 250px;
+        font-size: 0.85rem;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 8px 16px;
+        border-radius: 4px 4px 0 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Load sample data (replace with your actual data loading)
 @st.cache_data
 def load_data():
-    master = pd.read_csv("cleaned_master.csv")
-    ticket_types = pd.read_csv("ticket_type.csv")
-    service_types = pd.read_csv("service_type.csv")
+    master = pd.read_csv("data/cleaned_master.csv")
+    ticket_types = pd.read_csv("data/ticket_type.csv")
+    service_types = pd.read_csv("data/service_type.csv")
+    
+    form_four = pd.read_csv("data/form_four_trip-6.csv")
+    kms_mapping = form_four.set_index(['schedule_no', 'route_id'])['kms'].to_dict()
     
     # Map IDs to names
     master["ticket_type"] = master["ticket_type_short_code"].map(
@@ -25,715 +102,738 @@ def load_data():
     # Calculate revenue per km and passengers per km
     master["revenue_per_km"] = master["px_total_amount"] / master["travelled_KM"].replace(0, 1)
     master["passengers_per_km"] = master["px_count"] / master["travelled_KM"].replace(0, 1)
+
+    def update_travelled_km(row):
+        key = (row['schedule_no'], row['route_id'])
+        return kms_mapping.get(key, row['travelled_KM'])
     
+    master['travelled_KM'] = master.apply(update_travelled_km, axis=1)
+
     return master
 
 df = load_data()
 
-# --- Dashboard Layout ---
-st.title("🚌 Bus Ticket Sales Dashboard")
-st.markdown("Analyze ticket sales by type, service, route and schedule performance.")
+# ====================
+# SIDEBAR NAVIGATION
+# ====================
+st.sidebar.title("Navigation")
+page = st.sidebar.radio(
+    "Select Dashboard",
+    ["Summary Overview",  "Fleet Monitoring",   
+      "Route Performance","Route Optimization","Sustainability"],
+    label_visibility="collapsed"
+)
 
-# 1. Date Range Filter
-min_date = df["ticket_date"].min()
-max_date = df["ticket_date"].max()
-selected_dates = st.sidebar.date_input(
+
+# Global filters in sidebar
+st.sidebar.title("Global Filters")
+date_range = st.sidebar.date_input(
     "📅 Date Range",
-    [min_date, max_date],
-    min_value=min_date,
-    max_value=max_date
+    value=[df['ticket_datetime'].min(), df['ticket_datetime'].max()],
+    key="global_date_range"
 )
 
-# 2. Ticket Type (Product) Filter
-ticket_types = df["ticket_type"].unique()
-selected_ticket_types = st.sidebar.multiselect(
-    "🎟️ Ticket Types",
-    options=ticket_types,
-    default=ticket_types
+service_types = st.sidebar.multiselect(
+    "🔧 Service Types",
+    options=df['service_type'].unique(),
+    default=[],
+    key="global_service_types"
 )
 
-# 3. Route Filter
-routes = df["route_no"].unique()
-selected_routes = st.sidebar.multiselect(
-    "🛣️ Routes",
-    options=routes,
-    default=routes
-)
+# Apply global filters
+if service_types: # Check if service_types list is not empty
+    filtered_df = df[
+        (df['ticket_datetime'].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1]))) &
+        (df['service_type'].isin(service_types))
+    ]
+else:
+     filtered_df = df[
+        (df['ticket_datetime'].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])))
+    ]
 
-# 4. Service Type Filter
-service_types = df["service_type"].unique()
-selected_services = st.sidebar.multiselect(
-    "🚌 Service Types",
-    options=service_types,
-    default=service_types
-)
-
-# Apply all filters
-filtered_df = df[
-    (df["ticket_date"].between(selected_dates[0], selected_dates[1])) &
-    (df["ticket_type"].isin(selected_ticket_types)) &
-    (df["route_no"].isin(selected_routes)) &
-    (df["service_type"].isin(selected_services))
-]
-
-# Create tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8,tab9 = st.tabs([
-    "🚌 Summary Overview", "Ticket Types", "Service Analysis",
-    "Route Performance", "Optimization Summary",
-    "Fleet Summary", "Route Efficiency", 
-    "Passenger Metrics" ,"📅 Monthly Trends"
-])
-
-# Sales Overview Tab
-with tab1:
-    st.header("🚌 Summary Overview")
-
-    # col1, col2, col3 = st.columns(3)
-    # col1.metric("Total Tickets", len(filtered_df))
-    # col2.metric("Total Revenue", f"₹{filtered_df['px_total_amount'].sum():,.2f}")
-    # col3.metric("Avg. Ticket Price", f"₹{filtered_df['px_total_amount'].mean():,.2f}")
-    # Metrics
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Passengers", f"{filtered_df['px_count'].sum():,}")
-    col2.metric("Total Revenue", f"₹{filtered_df['px_total_amount'].sum():,.2f}")
-    col3.metric("Total Distance", f"{filtered_df['travelled_KM'].sum():,.0f} KM")
-
-    col4, col5 = st.columns(2)
-
-    col4.metric("Avg EPKM", f"₹{filtered_df['revenue_per_km'].mean():.2f}/KM")
-    col5.metric("Total Tickets", len(filtered_df))
+# ====================
+# PAGE 1: SUMMARY OVERVIEW
+# ====================
+if page == "Summary Overview":
+    st.title("📊 Summary Overview")
     
-    route_passengers = filtered_df.groupby("route_no")["px_count"].sum().sort_values(ascending=False)
-    daily_revenue = filtered_df.resample('D', on='ticket_datetime')["px_total_amount"].sum()
-
-    # Daily sales trend
-    daily_sales = filtered_df.groupby(filtered_df["ticket_datetime"].dt.date)["px_total_amount"].sum().reset_index()
-    fig = px.line(daily_sales, x="ticket_datetime", y="px_total_amount", 
-                 title="Daily Revenue Trend", labels={"px_total_amount": "Revenue (₹)"})
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("Passenger Count by Route")
-    st.bar_chart(route_passengers)
-
-    st.subheader("Key Insights")
-    best_route = route_passengers.idxmax()
-    st.success(f"🌟 Best Performing Route: {best_route} with {route_passengers.max():,} passengers")
+    # Horizontal filters
+    with st.container():
+        cols = st.columns(4)
+        with cols[0]:
+            ticket_types = st.multiselect(
+                "🎟️ Ticket Types",
+                options=df['ticket_type'].unique(),
+                default=[],
+                key="summary_ticket_types"
+            )
+        with cols[1]:
+            routes = st.multiselect(
+                "🛣️ Routes (Optional)",
+                options=df['route_no'].unique(),
+                key="summary_routes"
+            )
     
-    peak_day = daily_revenue.idxmax().strftime('%Y-%m-%d')
-    st.info(f"📈 Peak Revenue Day: {peak_day} (₹{daily_revenue.max():,.2f})")
-
-# Ticket Types Tab
-with tab2:
-    st.header("Ticket Type Analysis")
-
-    ticket_summary = filtered_df.groupby("ticket_type").agg(
-        total_tickets=("ticket_type", "count"),
-        total_revenue=("px_total_amount", "sum"),
-        avg_revenue=("px_total_amount", "mean")
-    ).sort_values("total_revenue", ascending=False)
+    # Apply additional filters
+    summary_df = filtered_df.copy()
+    if ticket_types:
+        summary_df = summary_df[summary_df['ticket_type'].isin(ticket_types)]
+    if routes:
+        summary_df = summary_df[summary_df['route_no'].isin(routes)]
     
-    # Format with Styler
-    ticket_summary_styled = ticket_summary.style.format({
-        "total_revenue": "₹{:,.2f}",
-        "avg_revenue": "₹{:,.2f}"
-    }).background_gradient(cmap="Blues", subset=["total_revenue"])
+    # Metrics cards
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Passengers</div>
+            <div class="metric-value">{summary_df['px_count'].sum():,}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.dataframe(ticket_summary_styled, use_container_width=True)
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Revenue</div>
+            <div class="metric-value">₹{summary_df['px_total_amount'].sum():,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    ticket_counts = filtered_df["ticket_type"].value_counts().reset_index()
-    fig = px.pie(ticket_counts, names="ticket_type", values="count", 
-                title="Ticket Type Distribution")
-    st.plotly_chart(fig, use_container_width=True)
-
-# Service Analysis Tab
-with tab3:
-    st.header("Service Type Analysis")
-
-    # --- Summary Table ---
-    service_summary = filtered_df.groupby("service_type").agg(
-        total_tickets=("service_type", "count"),
-        total_revenue=("px_total_amount", "sum"),
-        avg_distance_km=("travelled_KM", "mean"),
-        avg_revenue_per_km=("revenue_per_km", "mean")
-    ).sort_values("total_revenue", ascending=False)
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Distance</div>
+            <div class="metric-value">{summary_df['travelled_KM'].sum():,.0f} KM</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Format with Styler
-    service_summary_styled = service_summary.style.format({
-        "total_revenue": "₹{:,.2f}",
-        "avg_distance_km": "{:,.1f} km",
-        "avg_revenue_per_km": "₹{:,.2f}/km"
-    }).highlight_max(subset=["total_revenue"], color="#90EE90")
+    with col4:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Avg EPKM</div>
+            <div class="metric-value">₹{summary_df['revenue_per_km'].mean():.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.dataframe(service_summary_styled, use_container_width=True)
-
-
-    service_revenue = filtered_df.groupby("service_type")["px_total_amount"].sum().reset_index()
-    fig = px.bar(service_revenue, x="service_type", y="px_total_amount", 
-                title="Revenue by Service Type", labels={"px_total_amount": "Revenue (₹)"})
-    st.plotly_chart(fig, use_container_width=True)
-
-# Route and Schedule Performance Tab
-with tab4:
-    st.header("Route and Schedule Performance")
+    # Charts
+    tab1, tab2 = st.tabs(["Passenger Analysis", "Revenue Analysis"])
     
-    # Route selection
-    route_list = df["route_no"].unique()
-    selected_route = st.selectbox("Select Route", route_list)
+    with tab1:
+        left_column, right_column = st.columns(2)
+
+        # Top 5 Routes by Passengers
+        route_passengers_top = summary_df.groupby('route_no')['px_count'].sum().nlargest(5).sort_values(ascending=False)
+        top_colors = ['green'] * len(route_passengers_top)  # Color all bars green
+        fig1_top = px.bar(
+            route_passengers_top,
+            y=route_passengers_top.index,
+            x=route_passengers_top.values,
+            color=top_colors,  # Apply the green color list
+            title="<b>Top 5 Routes by Passenger Count</b>",
+            labels={'x': 'Passengers', 'y': 'Route'},
+            height=400
+        )
+        fig1_top.update_layout(
+            xaxis_title="Passengers",
+            yaxis_title="Route",
+        )
+        left_column.plotly_chart(fig1_top, use_container_width=True)
+
+        # Bottom 5 Routes by Passengers
+        route_passengers_bottom = summary_df.groupby('route_no')['px_count'].sum().nsmallest(5).sort_values(ascending=False)
+        bottom_colors = ['red'] * len(route_passengers_bottom)  # Color all bars red
+        fig1_bottom = px.bar(
+            route_passengers_bottom,
+            y=route_passengers_bottom.index,
+            x=route_passengers_bottom.values,
+            color=bottom_colors,  # Apply the red color list
+            title="<b>Bottom 5 Routes by Passenger Count</b>",
+            labels={'x': 'Passengers', 'y': 'Route'},
+            height=400
+        )
+        fig1_bottom.update_layout(
+            xaxis_title="Passengers",
+            yaxis_title="Route",
+        )
+        right_column.plotly_chart(fig1_bottom, use_container_width=True)
+    
+    with tab2:
+        # Revenue Trend
+        daily_revenue = summary_df.resample('D', on='ticket_datetime')['px_total_amount'].sum()
+        fig2 = px.line(
+            daily_revenue,
+            title="<b>Daily Revenue Trend</b>",
+            labels={'value': 'Revenue (₹)', 'date': 'Date'},
+            height=400
+        )
+        
+        # Highlight top 3 days
+        top_days = daily_revenue.nlargest(3)
+        for date, value in top_days.items():
+            fig2.add_annotation(
+                x=date,
+                y=value,
+                text=f"Peak: ₹{value:,.0f}",
+                showarrow=True,
+                arrowhead=1,
+                ax=0,
+                ay=-40
+            )
+        
+        st.plotly_chart(fig2, use_container_width=True)
+
+# ====================
+# PAGE 2: ROUTE PERFORMANCE
+# ====================
+elif page == "Route Performance":
+    st.title("🛣️ Route Performance")
+    
+    # Horizontal filters
+    with st.container():
+        cols = st.columns(3)
+        with cols[0]:
+            selected_route = st.selectbox(
+                "Select Route",
+                options=sorted(filtered_df['route_no'].unique()),
+                key="route_selector"
+            )
     
     # Filter data for selected route
-    route_df = filtered_df[filtered_df["route_no"] == selected_route]
-
-    # Summary Table
-    st.subheader(f"📈 Route {selected_route} Summary")
-    route_summary = route_df.groupby("schedule_no").agg(
-        total_tickets=("schedule_no", "count"),
-        total_revenue=("px_total_amount", "sum"),
-        avg_distance=("travelled_KM", "mean"),
-        avg_epkm=("revenue_per_km", "mean")
-    ).sort_values("total_revenue", ascending=False)
+    route_df = filtered_df[filtered_df['route_no'] == selected_route]
     
-    # Format with Styler
-    route_summary_styled = route_summary.style.format({
-        "total_revenue": "₹{:,.2f}",
-        "avg_distance": "{:,.1f} km",
-        "avg_epkm": "₹{:,.2f}/km"
-    }).set_properties(**{
-        "background-color": "#f7f7f7",
-        "border": "1px solid #d3d3d3"
-    })
-    
-    st.dataframe(route_summary_styled, use_container_width=True)
-    
-    # EPKM by Schedule
-    st.subheader(f"Schedulewise EPKM for {selected_route}")
-    epkm_data = route_df.groupby("schedule_no").agg({
-        "px_total_amount": "sum",
-        "travelled_KM": "mean",
-        "revenue_per_km": "mean"
-    }).reset_index()
-    
-    fig1 = px.bar(epkm_data, x="schedule_no", y="revenue_per_km",
-                 title=f"Earnings Per Kilometer (EPKM) by Schedule - {selected_route}",
-                 labels={"revenue_per_km": "EPKM (₹/km)", "schedule_no": "Schedule"})
-    st.plotly_chart(fig1, use_container_width=True)
-    
-    # Revenue vs Distance
-    st.subheader(f"Revenue vs Distance for {selected_route}")
-    fig2 = px.scatter(route_df, x="travelled_KM", y="px_total_amount",
-                     color="schedule_no", trendline="lowess",
-                     title=f"Revenue vs Distance Traveled - {selected_route}",
-                     labels={"px_total_amount": "Revenue (₹)", "travelled_KM": "Distance (km)"})
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    # Show raw data
-    st.subheader("Route Performance Data")
-    st.dataframe(route_df[["schedule_no", "trip_no", "travelled_KM", "px_total_amount", "revenue_per_km"]]
-                .sort_values("revenue_per_km", ascending=False))
-
-with tab5:
-    st.header("Route Optimization Summary")
-    
-    # Calculate the summary
-    optimization_summary = df.groupby('route_no').agg({
-        'px_total_amount': 'sum',          # Revenue
-        'travelled_KM': 'sum',            # Distance
-        'revenue_per_km': 'mean',          # Revenue per km
-    }).reset_index().rename(columns={
-        'route_no': 'Route',
-        'px_total_amount': 'Revenue',
-        'travelled_KM': 'Distance',
-        'revenue_per_km': 'Revenue_per_km'
-    })
-    
-    # Styled Table with Interactive Features
-    st.subheader("Key Route Metrics")
-    
-    # Sortable DataFrame
-    st.dataframe(
-        optimization_summary.style
-        .format({
-            "Revenue": "₹{:,.2f}",
-            "Distance": "{:,.1f} km",
-            "Revenue_per_km": "₹{:,.2f}/km"
-        })
-        .background_gradient(subset=["Revenue"], cmap="Greens")
-        .highlight_max(subset=["Revenue_per_km"], color="lightgreen"),
-        use_container_width=True
-    )
-    
-    # Download Button
-    csv = optimization_summary.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download as CSV",
-        data=csv,
-        file_name="route_optimization_summary.csv",
-        mime="text/csv"
-    )
-
-    st.metric("Most Efficient Route", 
-          optimization_summary.loc[optimization_summary["Revenue_per_km"].idxmax(), "Route"],
-          delta=f"₹{optimization_summary['Revenue_per_km'].max():.2f}/km")
-    
-    # Visualizations
-    col1, col2 = st.columns(2)
+    # Metrics cards
+    col1, col2, col3 = st.columns(3)
     with col1:
-        fig = px.bar(optimization_summary, 
-                    x="Route", y="Revenue",
-                    title="Total Revenue by Route")
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Trips</div>
+            <div class="metric-value">{route_df['trip_no'].nunique():,}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        fig = px.scatter(optimization_summary,
-                        x="Distance", y="Revenue_per_km",
-                        color="Route", size="Revenue",
-                        title="Efficiency: Revenue/km vs Distance")
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab6:
-    st.header("🚍 Fleet & Sustainability Optimization")
-
-    optimization_actions = pd.DataFrame({
-        "Issue": [
-            "Low occupancy trips",
-            "Overloaded trips",
-            "Long empty routes",
-            "High EPKM routes",
-            "Short high-load routes"
-        ],
-        "Metric": [
-            "Passengers/km < 0.5",
-            "Passenger load > 90% capacity",
-            "Distance high, Passenger low",
-            "EPKM > ₹15/km",
-            "Distance < 20km, Load > 80%"
-        ],
-        "Action": [
-            "Remove or club these trips",
-            "Add more buses or stagger timings",
-            "Shorten or re-route",
-            "Schedule more frequency",
-            "Assign electric buses"
-        ],
-        "Impact": [
-            "Reduce fuel waste",
-            "Improve passenger experience",
-            "Cut operational costs",
-            "Maximize profitability",
-            "Lower carbon emissions"
-        ]
-    })
-    electric_bus_routes = optimization_actions[optimization_actions["Action"].str.contains("electric")]
-    co2_saved = len(electric_bus_routes) * 20  # kg CO2/bus/day
-
-    # Key Metrics Summary
-    st.subheader("🔍 Route Health Indicators")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Low-Occupancy Trips", "12", "5% of total")  # Example data
-    col2.metric("Overloaded Trips", "8", "3% of total")
-    col3.metric("High-EPKM Routes", "15", "Prioritize expansion")
-    col4.metric("Estimated CO2 Reduction", f"{co2_saved}", "kg/day")
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Passengers</div>
+            <div class="metric-value">{route_df['px_count'].sum():,}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Actionable Insights Table
-    st.subheader("🛠️ Optimization Actions")
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Revenue</div>
+            <div class="metric-value">₹{route_df['px_total_amount'].sum():,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Style the table
-    st.dataframe(
-        optimization_actions.style
-        .applymap(lambda x: "background-color: #FFF8E1" if "electric" in str(x).lower() else "")
-        .set_properties(**{"border": "1px solid #E0E0E0"}),
-        use_container_width=True
-    )
+    # Charts
+    tab1, tab2 = st.tabs(["Schedule Efficiency", "Revenue Analysis"])
     
-    # Visualizations
-    st.subheader("📊 Route Performance Analysis")
-    
-    # Example: Low-Occupancy vs Overloaded Routes
-    fig = px.scatter(
-        df, 
-        x="travelled_KM", 
-        y="px_total_amount",  # Proxy for passengers (replace with actual passenger count if available)
-        color="route_no",
-        size="revenue_per_km",
-        hover_data=["schedule_no"],
-        title="Occupancy vs Distance (Size = EPKM)"
-    )
-    fig.add_hline(y=df["px_total_amount"].quantile(0.9), line_dash="dash", 
-                 annotation_text="Overload Threshold (90%)")
-    fig.add_hline(y=df["px_total_amount"].quantile(0.1), line_dash="dash", 
-                 annotation_text="Low-Occupancy Threshold (10%)")
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Downloadable Recommendations
-    st.download_button(
-        label="📥 Download Optimization Plan",
-        data=optimization_actions.to_csv(index=False).encode('utf-8'),
-        file_name="route_optimization_actions.csv",
-        mime="text/csv"
-    )
-
-with tab7:
-    st.header("🔄 Route Efficiency Optimizer")
-    
-    # Calculate Key Metrics
-    route_stats = df.groupby('route_no').agg(
-        total_revenue=('px_total_amount', 'sum'),
-        total_distance=('travelled_KM', 'sum'),
-        ticket_count=('ticket_type', 'count')  # Proxy for passenger count
-    ).reset_index()
-    
-    # Avoid division by zero
-    route_stats['revenue_per_km'] = route_stats['total_revenue'] / route_stats['total_distance'].replace(0, 1)
-    route_stats['tickets_per_km'] = route_stats['ticket_count'] / route_stats['total_distance'].replace(0, 1)
-    
-    # Efficiency Score (0-5 scale)
-    route_stats['efficiency_score'] = (
-        (route_stats['revenue_per_km'] / route_stats['revenue_per_km'].max() * 2.5) +
-        (route_stats['tickets_per_km'] / route_stats['tickets_per_km'].max() * 2.5)
-    ).clip(0, 5)
-    
-    # Key Metrics Summary
-    st.subheader("🚩 Quick Insights")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Avg. Tickets/km", f"{route_stats['tickets_per_km'].mean():.2f}")
-    col2.metric("Top EPKM Route", 
-                route_stats.loc[route_stats['revenue_per_km'].idxmax(), 'route_no'],
-                f"₹{route_stats['revenue_per_km'].max():.2f}/km")
-    col3.metric("Lowest Efficiency", 
-                route_stats.loc[route_stats['efficiency_score'].idxmin(), 'route_no'],
-                f"Score: {route_stats['efficiency_score'].min():.1f}/5")
-    
-    # Visualizations
-    st.subheader("📈 Route Efficiency Analysis")
-    
-    # Chart 1: Tickets per km
-    fig1 = px.bar(route_stats.sort_values('tickets_per_km', ascending=False),
-                 x='route_no', y='tickets_per_km',
-                 title="Ticket Density (Tickets/km)",
-                 labels={'tickets_per_km': 'Tickets per km'},
-                 color='tickets_per_km')
-    st.plotly_chart(fig1, use_container_width=True)
-    
-    # Chart 2: Revenue per km
-    fig2 = px.bar(route_stats.sort_values('revenue_per_km', ascending=False),
-                 x='route_no', y='revenue_per_km',
-                 title="Revenue Efficiency (₹/km)",
-                 labels={'revenue_per_km': 'Revenue per km'},
-                 color='revenue_per_km')
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    # Chart 3: Efficiency Score
-    fig3 = px.bar(route_stats.sort_values('efficiency_score', ascending=False),
-                 x='route_no', y='efficiency_score',
-                 title="Route Efficiency Score (0-5)",
-                 color='efficiency_score',
-                 color_continuous_scale='RdYlGn')
-    st.plotly_chart(fig3, use_container_width=True)
-    
-    # Actionable Recommendations
-    st.subheader("💡 Optimization Actions")
-    
-    recommendations = []
-    for _, row in route_stats.iterrows():
-        if row['tickets_per_km'] < 0.3:  # Low ticket density
-            action = "🚫 Merge/Cancel (Low demand)"
-        elif row['revenue_per_km'] > 15:  # High revenue
-            action = "🔄 Add peak-hour trips"
-        elif row['efficiency_score'] < 2:  # Low efficiency
-            action = "🛣️ Re-route"
-        else:
-            action = "✅ Optimal"
+    with tab1:
+        # Schedulewise EPKM
+        schedule_stats = route_df.groupby('schedule_no').agg({
+            'px_total_amount': 'sum',
+            'travelled_KM': 'mean',
+            'trip_no': 'nunique'
+        }).reset_index()
+        schedule_stats['epkm'] = schedule_stats['px_total_amount'] / schedule_stats['travelled_KM']
         
-        recommendations.append({
-            "Route": row['route_no'],
-            "Tickets/km": round(row['tickets_per_km'], 2),
-            "Revenue/km": f"₹{row['revenue_per_km']:.2f}",
-            "Efficiency Score": f"{row['efficiency_score']:.1f}/5",
-            "Action": action
-        })
-    
-    rec_df = pd.DataFrame(recommendations)
-    
-    # Color coding
-    def color_actions(val):
-        if "Merge/Cancel" in val: return 'background-color: #FFCDD2'
-        elif "Add peak-hour" in val: return 'background-color: #C8E6C9'
-        elif "Re-route" in val: return 'background-color: #FFF9C4'
-        else: return ''
-    
-    st.dataframe(
-        rec_df.style.applymap(color_actions, subset=['Action']),
-        use_container_width=True
-    )
-
-# New Tab: Passenger & Revenue Metrics
-with tab8:
-    st.header("🧮 Passenger & Revenue per Kilometer Analysis")
-    
-    # Calculate aggregated metrics by route
-    route_metrics = filtered_df.groupby('route_no').agg({
-        'px_count': 'sum',
-        'travelled_KM': 'sum',
-        'px_total_amount': 'sum'
-    }).reset_index()
-    
-    # Calculate passengers per km and revenue per km
-    route_metrics['passengers_per_km'] = route_metrics['px_count'] / route_metrics['travelled_KM'].replace(0, 1)
-    route_metrics['revenue_per_km'] = route_metrics['px_total_amount'] / route_metrics['travelled_KM'].replace(0, 1)
-    
-    # Sort by revenue per km
-    route_metrics = route_metrics.sort_values('revenue_per_km', ascending=False)
-    
-    # Display metrics table
-    st.subheader("Route Efficiency Metrics")
-    
-    metrics_styled = route_metrics.style.format({
-        'px_count': '{:,.0f}',
-        'travelled_KM': '{:,.1f} km',
-        'px_total_amount': '₹{:,.2f}',
-        'passengers_per_km': '{:,.2f}',
-        'revenue_per_km': '₹{:,.2f}'
-    }).background_gradient(subset=['passengers_per_km'], cmap='Blues')\
-      .background_gradient(subset=['revenue_per_km'], cmap='Greens')
-    
-    st.dataframe(metrics_styled, use_container_width=True)
-    
-    # Visualization: Passengers/km vs Revenue/km
-    st.subheader("Correlation: Passengers/km vs Revenue/km")
-    
-    fig1 = px.scatter(route_metrics, 
-                     x='passengers_per_km', 
-                     y='revenue_per_km',
-                     size='px_total_amount',  # Size by total revenue
-                     color='route_no',        # Color by route
-                     hover_data=['travelled_KM', 'px_count'],
-                     title="Efficiency Matrix: Passengers/km vs Revenue/km",
-                     labels={
-                         'passengers_per_km': 'Passengers per Kilometer',
-                         'revenue_per_km': 'Revenue per Kilometer (₹)'
-                     })
-    
-    fig1.update_layout(
-        xaxis=dict(tickformat='.2f'),
-        yaxis=dict(tickformat='₹,.2f')
-    )
-    
-    # Add quadrant lines and annotations
-    avg_passengers = route_metrics['passengers_per_km'].mean()
-    avg_revenue = route_metrics['revenue_per_km'].mean()
-    
-    fig1.add_hline(y=avg_revenue, line_dash="dash", line_color="gray", 
-                  annotation_text="Avg Revenue/km")
-    fig1.add_vline(x=avg_passengers, line_dash="dash", line_color="gray", 
-                  annotation_text="Avg Passengers/km")
-    
-    # Add quadrant labels
-    fig1.add_annotation(x=avg_passengers*1.5, y=avg_revenue*1.5, 
-                      text="High efficiency", showarrow=False, 
-                      font=dict(size=12, color="green"))
-    fig1.add_annotation(x=avg_passengers*0.5, y=avg_revenue*0.5, 
-                      text="Low efficiency", showarrow=False, 
-                      font=dict(size=12, color="red"))
-    
-    st.plotly_chart(fig1, use_container_width=True)
-    
-    # Dual Metrics Chart
-    st.subheader("Comparison: Passengers/km and Revenue/km by Route")
-    
-    # Create figure with secondary y-axis
-    fig2 = make_subplots(specs=[[{"secondary_y": True}]])
-    
-    # Add bar chart for passengers/km
-    fig2.add_trace(
-        go.Bar(
-            x=route_metrics['route_no'],
-            y=route_metrics['passengers_per_km'],
-            name="Passengers/km",
-            marker_color='royalblue'
-        ),
-        secondary_y=False
-    )
-    
-    # Add line chart for revenue/km
-    fig2.add_trace(
-        go.Scatter(
-            x=route_metrics['route_no'],
-            y=route_metrics['revenue_per_km'],
-            name="Revenue/km",
-            marker_color='green',
-            mode='lines+markers'
-        ),
-        secondary_y=True
-    )
-    
-    # Set titles and labels
-    fig2.update_layout(
-        title="Route Performance: Passengers/km vs Revenue/km",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
-    )
-    
-    fig2.update_xaxes(title_text="Route Number")
-    fig2.update_yaxes(title_text="Passengers per km", secondary_y=False)
-    fig2.update_yaxes(title_text="Revenue per km (₹)", secondary_y=True)
-    
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    # Time-based Analysis
-    st.subheader("Time-based Efficiency Analysis")
-    
-    # Group by date and calculate metrics
-    date_metrics = filtered_df.groupby(filtered_df["ticket_datetime"].dt.date).agg({
-        'px_count': 'sum',
-        'travelled_KM': 'sum',
-        'px_total_amount': 'sum'
-    }).reset_index()
-    
-    date_metrics['passengers_per_km'] = date_metrics['px_count'] / date_metrics['travelled_KM'].replace(0, 1)
-    date_metrics['revenue_per_km'] = date_metrics['px_total_amount'] / date_metrics['travelled_KM'].replace(0, 1)
-    
-    # Plot the time series
-    fig3 = px.line(date_metrics, x="ticket_datetime", y=["passengers_per_km", "revenue_per_km"],
-                  title="Daily Efficiency Metrics",
-                  labels={
-                      "ticket_datetime": "Date",
-                      "value": "Metric Value",
-                      "variable": "Metric Type"
-                  })
-    
-    # Update y-axis format for revenue
-    fig3.update_traces(
-        yaxis="y2",
-        selector=dict(name="revenue_per_km")
-    )
-    
-    fig3.update_layout(
-        yaxis_title="Passengers per km",
-        yaxis2=dict(
-            title="Revenue per km (₹)",
-            overlaying="y",
-            side="right"
+        fig1 = px.bar(
+            schedule_stats.sort_values('epkm', ascending=False),
+            x='schedule_no',
+            y='epkm',
+            color='epkm',
+            color_continuous_scale='Viridis',
+            title=f"<b>Schedule-wise EPKM for {selected_route}</b>",
+            labels={'epkm': 'Revenue per KM (₹)', 'schedule_no': 'Schedule'},
+            height=450
         )
-    )
+        st.plotly_chart(fig1, use_container_width=True)
     
-    st.plotly_chart(fig3, use_container_width=True)
-    
-    # Additional analysis: Route recommendations based on metrics
-    st.subheader("📋 Route Recommendations Based on Efficiency")
-    
-    recommendations = []
-    for _, row in route_metrics.iterrows():
-        if row['passengers_per_km'] > avg_passengers and row['revenue_per_km'] > avg_revenue:
-            status = "⭐ High performing (Increase frequency)"
-            color = "#C8E6C9"  # Light green
-        elif row['passengers_per_km'] > avg_passengers and row['revenue_per_km'] < avg_revenue:
-            status = "👥 High occupancy, low revenue (Review pricing)"
-            color = "#FFF9C4"  # Light yellow
-        elif row['passengers_per_km'] < avg_passengers and row['revenue_per_km'] > avg_revenue:
-            status = "💰 High revenue, low occupancy (Premium service)"
-            color = "#BBDEFB"  # Light blue
-        else:
-            status = "⚠️ Underperforming (Consider restructuring)"
-            color = "#FFCDD2"  # Light red
+    with tab2:
+        # Revenue vs Distance
+        trip_stats = route_df.groupby('trip_no').agg({
+            'px_total_amount': 'sum',
+            'travelled_KM': 'mean',
+            'px_count': 'sum'
+        }).reset_index()
         
-        recommendations.append({
-            "Route": row['route_no'],
-            "Passengers/km": f"{row['passengers_per_km']:.2f}",
-            "Revenue/km": f"₹{row['revenue_per_km']:.2f}",
-            "Status": status,
-            "Color": color
-        })
+        fig2 = px.scatter(
+            trip_stats,
+            x='travelled_KM',
+            y='px_total_amount',
+            size='px_count',
+            color='px_total_amount',
+            hover_name='trip_no',
+            title=f"<b>Revenue vs Distance for {selected_route}</b>",
+            labels={
+                'px_total_amount': 'Revenue (₹)',
+                'travelled_KM': 'Distance (KM)',
+                'px_count': 'Passengers'
+            },
+            color_continuous_scale='thermal',
+            height=450
+        )
+        st.plotly_chart(fig2, use_container_width=True)
     
-    rec_df = pd.DataFrame(recommendations)
+    # Dynamic Insights
+    st.subheader("Performance Insights")
     
-    # Style the recommendations table
-    def color_status(val):
-        for rec in recommendations:
-            if val == rec['Status']:
-                return f"background-color: {rec['Color']}"
-        return ""
-    
-    st.dataframe(
-        rec_df[["Route", "Passengers/km", "Revenue/km", "Status"]].style
-        .applymap(color_status, subset=['Status']),
-        use_container_width=True
-    )
-
-
-with tab9:
-    st.header("📈 Monthly Performance Analysis")
-    
-    # 1. Monthly Aggregations
-    monthly_data = filtered_df.resample('M', on='ticket_datetime').agg({
-        'px_total_amount': 'sum',
-        'transaction_no': 'count',
-        'travelled_KM': 'sum'
-    }).rename(columns={
-        'px_total_amount': 'Revenue',
-        'transaction_no': 'Ticket_Count',
-        'travelled_KM': 'Distance_KM'
-    })
-    
-    monthly_data['Revenue_per_KM'] = monthly_data['Revenue'] / monthly_data['Distance_KM']
-    monthly_data['Avg_Ticket_Price'] = monthly_data['Revenue'] / monthly_data['Ticket_Count']
-    monthly_data.index = monthly_data.index.strftime('%Y-%m')  # Clean date format
-    
-    # 2. Key Metrics
-    st.subheader("Monthly Summary")
-    col1, col2, col3 = st.columns(3)
-    latest_month = monthly_data.iloc[-1]
-    col1.metric("Latest Month Revenue", f"₹{latest_month['Revenue']:,.2f}")
-    col2.metric("Ticket Count", f"{latest_month['Ticket_Count']:,}")
-    col3.metric("Revenue/km", f"₹{latest_month['Revenue_per_KM']:.2f}")
-    
-    # 3. Trend Charts
-    st.subheader("Trend Analysis")
-    
-    fig1 = px.line(monthly_data.reset_index(), 
-                 x='ticket_datetime', y='Revenue',
-                 title="Monthly Revenue Trend",
-                 labels={'ticket_datetime': 'Month', 'Revenue': 'Revenue (₹)'})
-    st.plotly_chart(fig1, use_container_width=True)
-    
-    fig2 = px.bar(monthly_data.reset_index(),
-                 x='ticket_datetime', y='Ticket_Count',
-                 title="Monthly Ticket Volume",
-                 labels={'ticket_datetime': 'Month', 'Ticket_Count': 'Tickets Sold'})
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    # 4. Efficiency Metrics
-    st.subheader("Efficiency Trends")
     col1, col2 = st.columns(2)
     
     with col1:
-        fig3 = px.line(monthly_data.reset_index(),
-                      x='ticket_datetime', y='Revenue_per_KM',
-                      title="Revenue per Kilometer",
-                      labels={'Revenue_per_KM': '₹/km'})
+        st.markdown("**Top Performing Schedules**")
+        top_schedules = schedule_stats.nlargest(3, 'epkm')
+        for _, row in top_schedules.iterrows():
+            st.markdown(f"""
+            <div class="insight-card">
+                🏆 <b>{row['schedule_no']}</b><br>
+                ₹{row['epkm']:.2f} per KM | {row['trip_no']} trips
+            </div>
+            """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("**Revenue Leakage Alerts**")
+        avg_revenue = trip_stats['px_total_amount'].mean()
+        low_rev_trips = trip_stats[trip_stats['px_total_amount'] < avg_revenue * 0.7]
+        
+        if not low_rev_trips.empty:
+            for _, row in low_rev_trips.nsmallest(3, 'px_total_amount').iterrows():
+                st.markdown(f"""
+                <div class="warning-card">
+                    ⚠️ <b>Trip {row['trip_no']}</b><br>
+                    ₹{row['px_total_amount']:.2f} | {row['travelled_KM']:.1f} KM
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown("No significant revenue leakage detected")
+
+# ====================
+# PAGE 4: ROUTE OPTIMIZATION
+# ====================
+elif page == "Route Optimization":
+    st.title("📈 Route Optimization")
+    
+    # Filters in horizontal layout
+    with st.container():
+        cols = st.columns(3)
+        with cols[0]:
+            route_option = st.selectbox(
+                "Select Route (Optional)",
+                options=["All"] + sorted(filtered_df['route_no'].unique()),
+                key="opt_route_selector"
+            )
+        with cols[1]:
+            min_distance = st.number_input(
+                "Min Distance (KM)",
+                min_value=0,
+                max_value=int(filtered_df['travelled_KM'].max()),
+                value=0,
+                key="opt_min_distance"
+            )
+        with cols[2]:
+            max_distance = st.number_input(
+                "Max Distance (KM)",
+                min_value=0,
+                max_value=int(filtered_df['travelled_KM'].max()),
+                value=int(filtered_df['travelled_KM'].max()),
+                key="opt_max_distance"
+            )
+    
+    # Apply filters
+    optimization_df = filtered_df.copy()
+    if route_option != "All":
+        optimization_df = optimization_df[optimization_df['route_no'] == route_option]
+    
+    optimization_df = optimization_df[
+        (optimization_df['travelled_KM'] >= min_distance) &
+        (optimization_df['travelled_KM'] <= max_distance)
+    ]
+    
+    # Metrics
+    avg_passenger_km = optimization_df['passengers_per_km'].mean()
+    avg_revenue_km = optimization_df['revenue_per_km'].mean()
+    efficiency_score = avg_revenue_km / avg_passenger_km if avg_passenger_km else 0
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Avg Passengers/KM</div>
+            <div class="metric-value">{avg_passenger_km:.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Avg Revenue/KM</div>
+            <div class="metric-value">₹{avg_revenue_km:.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Efficiency Score</div>
+            <div class="metric-value">{efficiency_score:.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Charts
+    tab1, tab2, tab3 = st.tabs(["Passenger Density", "Revenue Efficiency", "Route Efficiency"])
+    
+    with tab1:
+        # Passenger Density
+        passenger_density = optimization_df.groupby('route_no')['passengers_per_km'].mean().sort_values(ascending=False).reset_index()
+        fig1 = px.bar(
+            passenger_density,
+            x='route_no',
+            y='passengers_per_km',
+            title="<b>Passenger Density by Route</b>",
+            labels={'passengers_per_km': 'Passengers per KM', 'route_no': 'Route'},
+            height=450
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+    
+    with tab2:
+        # Revenue Efficiency
+        revenue_efficiency = optimization_df.groupby('route_no')['revenue_per_km'].mean().sort_values(ascending=False).reset_index()
+        fig2 = px.bar(
+            revenue_efficiency,
+            x='route_no',
+            y='revenue_per_km',
+            title="<b>Revenue per KM by Route</b>",
+            labels={'revenue_per_km': 'Revenue per KM (₹)', 'route_no': 'Route'},
+            height=450
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+    
+    with tab3:
+        # Route Efficiency Score
+        route_efficiency = optimization_df.groupby('route_no').apply(lambda x: x['revenue_per_km'].mean() / x['passengers_per_km'].mean() if x['passengers_per_km'].mean() else 0).sort_values(ascending=False).reset_index(name='efficiency_score')
+        fig3 = px.bar(
+            route_efficiency,
+            x='route_no',
+            y='efficiency_score',
+            title="<b>Route Efficiency Score</b>",
+            labels={'efficiency_score': 'Efficiency Score', 'route_no': 'Route'},
+            color='efficiency_score',
+            color_continuous_scale='viridis',
+            height=450
+        )
         st.plotly_chart(fig3, use_container_width=True)
     
-    with col2:
-        fig4 = px.line(monthly_data.reset_index(),
-                      x='ticket_datetime', y='Avg_Ticket_Price',
-                      title="Average Ticket Price",
-                      labels={'Avg_Ticket_Price': 'Price (₹)'})
-        st.plotly_chart(fig4, use_container_width=True)
+    # Dynamic Insights
+    st.subheader("Optimization Insights")
     
-    # 5. Data Table
-    st.subheader("Monthly Data")
-    st.dataframe(
-        monthly_data.style.format({
-            'Revenue': '₹{:,.2f}',
-            'Revenue_per_KM': '₹{:,.2f}',
-            'Avg_Ticket_Price': '₹{:,.2f}'
-        }),
+    st.markdown("""
+    Based on your selected filters, here are some potential route optimization suggestions:
+    """, unsafe_allow_html=True)
+    
+    # Suggest routes to merge/cancel
+    low_performing_routes = route_efficiency[route_efficiency['efficiency_score'] < 0.8]  # Example threshold
+    if not low_performing_routes.empty:
+        st.markdown(f"""
+        <div class="warning-card">
+            ⚠️ <b>Consider merging/cancelling the following routes:</b>
+        </div>
+        """, unsafe_allow_html=True)
+        for _, route in low_performing_routes.iterrows():
+            st.markdown(f"""
+            <div class="insight-card">
+                Route {route['route_no']} (Efficiency Score: {route['efficiency_score']:.2f})
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="insight-card">
+            ✅ No routes identified for potential merging/cancellation based on the selected criteria.
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Suggest routes for extra buses
+    high_density_routes = passenger_density[passenger_density['passengers_per_km'] > 5]  # Example threshold
+    if not high_density_routes.empty:
+        st.markdown(f"""
+        <div class="insight-card">
+            🚌 <b>Consider adding more buses to the following routes during peak hours:</b>
+        </div>
+        """, unsafe_allow_html=True)
+        for _, route in high_density_routes.iterrows():
+            st.markdown(f"""
+            <div class="insight-card">
+                Route {route['route_no']} (Passenger Density: {route['passengers_per_km']:.2f})
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="insight-card">
+            ✅ No routes identified as needing additional buses based on the selected criteria.
+        </div>
+        """, unsafe_allow_html=True)
+
+
+elif page == "Fleet Monitoring":
+    st.title("🚌 Fleet Monitoring")
+    
+    # Filters
+    with st.container():
+        cols = st.columns(2)
+        with cols[0]:
+            selected_vehicle = st.selectbox(
+                "Select Vehicle (Optional)",
+                options=["All"] + sorted(df['vehicle_no'].unique()),
+                key="fleet_vehicle_selector"
+            )
+        with cols[1]:
+             date_range_form_four = st.date_input(
+                "Date Range",
+                value=(df['ticket_datetime'].min(), df['ticket_datetime'].max()),
+                key = 'fleet_date_range'
+            )
+            
+    # Filter data (assuming you have vehicle data in your main DataFrame)
+    fleet_df = df.copy() #Using the main dataframe as the user did not provide a new one.
+    
+    if selected_vehicle != "All":
+        fleet_df = fleet_df[fleet_df['vehicle_no'] == selected_vehicle]
+    
+    fleet_df = fleet_df[
+        (fleet_df['ticket_datetime'].dt.date >= date_range_form_four[0]) & (fleet_df['ticket_datetime'].dt.date <= date_range_form_four[1])
+    ]
+        
+    # Metrics (example calculations - adjust based on your actual data structure)
+    total_distance = fleet_df['travelled_KM'].sum()
+    total_trips = fleet_df['trip_no'].sum()
+    
+    # Calculate active and idle vehicles.  This assumes that if a vehicle has ANY trips in the filtered data, it is considered active.
+    active_vehicles = fleet_df['vehicle_no'].unique().size
+    total_vehicles = df['vehicle_no'].nunique() # Get the total number of unique vehicles from the entire dataset.
+    idle_vehicles = total_vehicles - active_vehicles
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Distance</div>
+            <div class="metric-value">{total_distance:,.0f} KM</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Trips</div>
+            <div class="metric-value">{total_trips:,}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+   
+    
+    # Charts
+    tab1, tab2 = st.tabs(["Vehicle Utilization", "Distance Trend"])
+    
+    with tab1:
+        # Trips per Vehicle
+        trips_per_vehicle = fleet_df.groupby('vehicle_no')['trip_no'].nunique().sort_values(ascending=False).reset_index(name='trips')
+        fig1 = px.bar(
+            trips_per_vehicle,
+            x='vehicle_no',
+            y='trips',
+            title="<b>Trips Made per Vehicle</b>",
+            labels={'trips': 'Number of Trips', 'vehicle_no': 'Vehicle'},
+            height=450
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+    
+    with tab2:
+        # Distance Trend (Example: Monthly)
+        distance_trend = fleet_df.groupby(fleet_df['ticket_datetime'].dt.to_period('M'))['travelled_KM'].sum().reset_index()
+        distance_trend['ticket_datetime'] = distance_trend['ticket_datetime'].dt.to_timestamp()
+        fig2 = px.line(
+            distance_trend,
+            x='ticket_datetime',
+            y='travelled_KM',
+            title="<b>Monthly Distance Travelled</b>",
+            labels={'travelled_KM': 'Distance (KM)', 'ticket_datetime': 'Date'},
+            height=450
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+    
+    # Dynamic Insights
+    st.subheader("Fleet Insights")
+    
+    st.markdown("""
+    Based on the selected filters, here are some fleet monitoring insights:
+    """, unsafe_allow_html=True)
+    
+    # Detect underutilized buses
+    avg_trips_per_vehicle = fleet_df.groupby('vehicle_no')['trip_no'].nunique().mean()
+    underutilized_vehicles = trips_per_vehicle[trips_per_vehicle['trips'] < avg_trips_per_vehicle * 0.7] # Example threshold
+    if not underutilized_vehicles.empty:
+        st.markdown("<h4 style='color:red;'>⚠️ Underutilized Buses:</h4>", unsafe_allow_html=True)
+        fig = px.bar(
+            underutilized_vehicles,
+            x='vehicle_no',
+            y='trips',
+            labels={'trips': 'Number of Trips', 'vehicle_no': 'Vehicle'},
+            title="Underutilized Vehicles"
+        )
+        st.plotly_chart(fig)
+       
+    else:
+        st.markdown(f"""
+        <div class="insight-card">
+            ✅ No underutilized vehicles detected based on the selected criteria.
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Detect overused buses
+    overutilized_vehicles = trips_per_vehicle[trips_per_vehicle['trips'] > avg_trips_per_vehicle * 1.3]  # Example threshold
+    if not overutilized_vehicles.empty:
+        st.markdown(f"<h4 style='color:red;'>⚠️ Overused Buses:</h4>", unsafe_allow_html=True)
+        fig = px.bar(
+            overutilized_vehicles,
+            x='vehicle_no',
+            y='trips',
+            labels={'trips': 'Number of Trips', 'vehicle_no': 'Vehicle'},
+            title="Overutilized Vehicles"
+        )
+        st.plotly_chart(fig)
+    else:
+        st.markdown(f"""
+        <div class="insight-card">
+            ✅ No overused vehicles detected based on the selected criteria.
+        </div>
+        """, unsafe_allow_html=True)
+
+
+
+# ====================
+# PAGE 6: SUSTAINABILITY DASHBOARD
+# ====================
+elif page == "Sustainability":
+    st.title("🌿 Sustainability Dashboard")
+    
+    # Horizontal filters
+    with st.container():
+        cols = st.columns(2)
+        with cols[0]:
+            # Use a single-select dropdown for Bus Type, with "All" option
+            bus_type_option = st.selectbox(
+                "Select Bus Type",
+                options=["All", "EV INTERSTATE", "MANUAL LOCAL INTERSTATE"],  # Corrected options
+                key="sustain_bus_type"
+            )
+    
+    # Apply filters
+    sustain_df = filtered_df.copy()
+    
+    # Filter by bus type.  Correctly apply the filter.
+    if bus_type_option == "EV INTERSTATE":
+        sustain_df = sustain_df[sustain_df['service_type'] == "EV INTERSTATE"]
+    elif bus_type_option == "MANUAL LOCAL INTERSTATE":
+        sustain_df = sustain_df[sustain_df['service_type'] == "MANUAL LOCAL INTERSTATE"]
+    # "All" requires no filtering
+    
+    # 1.  Calculate total distance for EV and Diesel
+    total_distance_ev = sustain_df[sustain_df['service_type'] == "EV INTERSTATE"]['travelled_KM'].sum()
+    total_distance_diesel = sustain_df[sustain_df['service_type'] == "MANUAL LOCAL INTERSTATE"]['travelled_KM'].sum()
+    total_distance_all = sustain_df['travelled_KM'].sum() # For CO2 savings calculation
+    
+    # 2.  CO2 Emissions (Estimates) - Simplified for demonstration
+    # Assume a fixed emission factor for diesel and zero for EV.
+    diesel_emission_factor = 0.3  # kg CO2 per KM (example value, replace with actual data)
+    
+    co2_emitted_diesel = total_distance_diesel * diesel_emission_factor
+    co2_emitted_ev = 0  # EV emits zero CO2
+    total_co2_emitted = co2_emitted_diesel + co2_emitted_ev
+    
+    # 3. CO2 Saved (Projected) - compared to if *all* were diesel.
+    co2_emitted_all_diesel = total_distance_all * diesel_emission_factor
+    co2_saved = co2_emitted_all_diesel - total_co2_emitted
+    
+    # Metrics Cards
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">KM Driven (Diesel)</div>
+            <div class="metric-value">{total_distance_diesel:,.0f} KM</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">KM Driven (EV)</div>
+            <div class="metric-value">{total_distance_ev:,.0f} KM</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">CO2 Emissions (Est.)</div>
+            <div class="metric-value">{total_co2_emitted:,.0f} kg</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    col4 = st.columns(1)
+    with col4[0]:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">CO2 Saved (Projected)</div>
+            <div class="metric-value">{co2_saved:,.0f} kg</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Charts
+    
+    
+    # Dynamic Insights
+    st.subheader("Sustainability Insights")
+    
+    if total_distance_ev > 0:
+        st.markdown(f"""
+        <div class="insight-card">
+            ✅ EV buses have contributed to a reduction of {co2_saved:.0f} kg of CO2 emissions.
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="insight-card">
+            ⚠️ No EV buses in operation during the selected period. Consider increasing EV deployment to reduce emissions.
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Suggesting eco-friendly routes (simplified)
+    # In a real scenario, you'd have data on route-specific emissions.
+    st.markdown("💡 **Potential Eco-Friendly Routes:**", unsafe_allow_html=True)
+    
+    #  Suggest top 3 routes with highest EV KM.
+    route_ev_km = sustain_df[sustain_df['service_type'] == 'EV INTERSTATE'].groupby('route_no')['travelled_KM'].sum().sort_values(ascending=False)
+    
+    if not route_ev_km.empty:
+        for route, distance in route_ev_km.head(3).items(): #show top 3 routes
+            st.markdown(f"""
+            <div class="insight-card">
+                Route {route}: {distance:.0f} KM (EV)
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown("No EV bus operation on any route during this period.",unsafe_allow_html=True)
+
+# ====================
+# DATA EXPORT
+# ====================
+with st.sidebar:
+    st.download_button(
+        label="⬇️ Export Data",
+        data=filtered_df.to_csv(index=False).encode('utf-8'),
+        file_name=f"transport_data_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime='text/csv',
         use_container_width=True
     )
-
-
-
-
-# Raw data table (all tabs)
-st.sidebar.header("Raw Data Preview")
-if st.sidebar.checkbox("Show raw data"):
-    st.subheader("Filtered Raw Data")
-    st.dataframe(filtered_df)
