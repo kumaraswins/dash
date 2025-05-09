@@ -9,7 +9,7 @@ st.set_page_config(
     page_title="Transport Analytics Dashboard",
     page_icon="🚍",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom CSS
@@ -79,36 +79,62 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Load sample data (replace with your actual data loading)
+
 @st.cache_data
 def load_data():
-    master = pd.read_csv("data/cleaned_master.csv")
-    ticket_types = pd.read_csv("data/ticket_type.csv")
-    service_types = pd.read_csv("data/service_type.csv")
-    
-    form_four = pd.read_csv("data/form_four_trip-6.csv")
-    kms_mapping = form_four.set_index(['schedule_no', 'route_id'])['kms'].to_dict()
-    
-    # Map IDs to names
-    master["ticket_type"] = master["ticket_type_short_code"].map(
-        dict(zip(ticket_types["ticket_type_id"], ticket_types["ticket_type_name"])))
-    master["service_type"] = master["bus_service_id"].map(
-        dict(zip(service_types["service_type_id"], service_types["service_type_name"])))
-    
-    # Convert dates and calculate derived metrics
-    master["ticket_datetime"] = pd.to_datetime(
-        master["ticket_date"] + " " + master["ticket_time"])
-    master["ticket_date"] = master["ticket_datetime"].dt.date  # Extract date for filtering
-    
-    # Calculate revenue per km and passengers per km
-    master["revenue_per_km"] = master["px_total_amount"] / master["travelled_KM"].replace(0, 1)
-    master["passengers_per_km"] = master["px_count"] / master["travelled_KM"].replace(0, 1)
+    chunk_size = 75000
+    all_chunks = []
+    reader = pd.read_csv("data/cleaned_master.csv", chunksize=chunk_size)
+    for i, chunk in enumerate(reader):
+        print(f"Loading chunk {i+1} (up to {chunk_size*(i+1)} records)...")
+        all_chunks.append(chunk)
+        if i == 0: # Load the first chunk and process mappings
+            master = chunk.copy()
+            ticket_types = pd.read_csv("data/ticket_type.csv")
+            service_types = pd.read_csv("data/service_type.csv")
+            form_four = pd.read_csv("data/form_four_trip-6.csv")
+            kms_mapping = form_four.set_index(['schedule_no', 'route_id'])['kms'].to_dict()
 
-    def update_travelled_km(row):
-        key = (row['schedule_no'], row['route_id'])
-        return kms_mapping.get(key, row['travelled_KM'])
-    
-    master['travelled_KM'] = master.apply(update_travelled_km, axis=1)
+            # Map IDs to names
+            master["ticket_type"] = master["ticket_type_short_code"].map(
+                dict(zip(ticket_types["ticket_type_id"], ticket_types["ticket_type_name"])))
+            master["service_type"] = master["bus_service_id"].map(
+                dict(zip(service_types["service_type_id"], service_types["service_type_name"])))
 
+            # Convert dates and calculate derived metrics
+            master["ticket_datetime"] = pd.to_datetime(
+                master["ticket_date"] + " " + master["ticket_time"])
+            master["ticket_date"] = master["ticket_datetime"].dt.date  # Extract date for filtering
+
+            # Calculate initial revenue per km and passengers per km (on the first chunk)
+            master["revenue_per_km"] = master["px_total_amount"] / master["travelled_KM"].replace(0, 1)
+            master["passengers_per_km"] = master["px_count"] / master["travelled_KM"].replace(0, 1)
+
+            def update_travelled_km(row):
+                key = (row['schedule_no'], row['route_id'])
+                return kms_mapping.get(key, row['travelled_KM'])
+
+            master['travelled_KM'] = master.apply(update_travelled_km, axis=1)
+        elif i > 0: # For subsequent chunks, perform the same transformations
+            chunk["ticket_type"] = chunk["ticket_type_short_code"].map(
+                dict(zip(ticket_types["ticket_type_id"], ticket_types["ticket_type_name"])))
+            chunk["service_type"] = chunk["bus_service_id"].map(
+                dict(zip(service_types["service_type_id"], service_types["service_type_name"])))
+            chunk["ticket_datetime"] = pd.to_datetime(
+                chunk["ticket_date"] + " " + chunk["ticket_time"])
+            chunk["ticket_date"] = chunk["ticket_datetime"].dt.date
+            chunk["revenue_per_km"] = chunk["px_total_amount"] / chunk["travelled_KM"].replace(0, 1)
+            chunk["passengers_per_km"] = chunk["px_count"] / chunk["travelled_KM"].replace(0, 1)
+            chunk['travelled_KM'] = chunk.apply(update_travelled_km, axis=1)
+            master = pd.concat([master, chunk]) # Concatenate with the main DataFrame
+            print(f"Processed chunk {i+1} (up to {chunk_size*(i+1)} records).")
+        if i == 0: # Only need to load supporting CSVs once
+            ticket_types = pd.read_csv("data/ticket_type.csv")
+            service_types = pd.read_csv("data/service_type.csv")
+            form_four = pd.read_csv("data/form_four_trip-6.csv")
+            kms_mapping = form_four.set_index(['schedule_no', 'route_id'])['kms'].to_dict()
+
+    print("All data chunks loaded and processed.")
     return master
 
 df = load_data()
@@ -228,7 +254,7 @@ if page == "Summary Overview":
             route_passengers_top,
             y=route_passengers_top.index,
             x=route_passengers_top.values,
-            color=top_colors,  # Apply the green color list
+            color_discrete_sequence=top_colors,  # Apply the green color list
             title="<b>Top 5 Routes by Passenger Count</b>",
             labels={'x': 'Passengers', 'y': 'Route'},
             height=400
@@ -246,7 +272,7 @@ if page == "Summary Overview":
             route_passengers_bottom,
             y=route_passengers_bottom.index,
             x=route_passengers_bottom.values,
-            color=bottom_colors,  # Apply the red color list
+            color_discrete_sequence=bottom_colors,  # Apply the red color list
             title="<b>Bottom 5 Routes by Passenger Count</b>",
             labels={'x': 'Passengers', 'y': 'Route'},
             height=400
