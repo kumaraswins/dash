@@ -127,7 +127,7 @@ with col1:
     month_filter = st.multiselect(
         "Month",
         options=available_months,
-        default=available_months, # Default to all months
+        default=[], # Default to all months
         help="Filter by month(s)"
     )
 
@@ -151,21 +151,21 @@ with col2:
     day_filter = st.multiselect(
         "Day of Week",
         options=day_options,
-        default=day_options # Default to all days
+        default=[] # Default to all days
     )
 
 with col3:
     service_filter = st.multiselect(
         "Service Type",
         options=color_lines,
-        default=color_lines # Default to all service types
+        default=[] # Default to all service types
     )
 
 with col4:
     route_filter = st.multiselect(
         "Route",
         options=route_options,
-        default=route_options # Default to all routes
+        default=[] # Default to all routes
     )
 
 # Apply filters
@@ -258,7 +258,7 @@ st.markdown("## Performance Analysis")
 with st.container():
     st.markdown("#### Revenue Trends")
 
-    tab1, tab2 = st.tabs(["Monthly View", "Daily Pattern"])
+    tab1, tab2, tab3,tab4  = st.tabs(["Monthly View", "Daily Pattern","Schedule-wise EPKM","Max Trip Number Count"])
 
     with tab1:
         # Ensure data exists before plotting
@@ -302,6 +302,50 @@ with st.container():
         else:
             st.info("No data available for daily revenue pattern.")
 
+    with tab3:
+        st.markdown("#### Average EPKM by Schedule")
+        # Ensure data exists before plotting
+        if not filtered_df.empty:
+            # Calculate average EPKM per schedule number
+            schedule_epkm = filtered_df.groupby('schedule_number')['Epkm'].mean().reset_index()
+
+            # Sort by average EPKM for better visualization (optional)
+            #schedule_epkm = schedule_epkm.sort_values('Epkm', ascending=False)
+
+            fig = px.bar(
+                schedule_epkm,
+                x='schedule_number',
+                y='Epkm',
+                title="Average EPKM per Schedule Number",
+                labels={'Epkm': 'Average EPKM (₹/km)', 'schedule_number': 'Schedule Number'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No data available for schedule-wise EPKM analysis.")
+    
+    with tab4:
+        st.markdown("#### Total Trips per Schedule by Date")
+        # Ensure data exists before plotting
+        if not filtered_df.empty:
+            # Group by date and schedule, find the max trip number for each group
+            trips_per_schedule_day = filtered_df.groupby(['running_date', 'schedule_number'])['trip_number'].max().reset_index()
+
+            # Create a bar chart showing max trip number over time for each schedule
+            fig = px.bar( # Changed from px.line to px.bar
+                trips_per_schedule_day,
+                x='running_date',
+                y='trip_number',
+                color='schedule_number', # Use schedule_number for different bars/colors
+                title="Total Trips per Schedule by Date",
+                labels={'running_date': 'Date', 'trip_number': 'Total Trips', 'schedule_number': 'Schedule Number'}
+            )
+
+            # Improve layout for date axis if needed (optional)
+            fig.update_layout(xaxis_title="Date", yaxis_title="Total Trips")
+
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No data available for trips per schedule analysis.")
 
 # Weekly Comparison Visualization
 # Only show if exactly one month is selected and more than one week is selected
