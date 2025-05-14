@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+import plotly.graph_objects as go  # Add this line
+
 
 # Configure page settings
 st.set_page_config(
@@ -76,48 +78,59 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Filters Section
-# Filters Section
+
 st.markdown("### Filters")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
+    # Month selection
     month_filter = st.multiselect(
         "Month",
         options=available_months,
-        default=available_months,
+        default=[],
         help="Filter by month(s)"
     )
-    # If empty, use all months
     month_filter = month_filter if month_filter else available_months
+    
+    # Weekly drill-down for selected months
+    if len(month_filter) == 1:  # Only show weeks when exactly one month is selected
+        selected_month_num = datetime.strptime(month_filter[0], "%B").month
+        month_df = df[df['running_date'].dt.month == selected_month_num]
+        week_options = sorted(month_df['running_date'].dt.isocalendar().week.unique())
+        
+        week_filter = st.multiselect(
+            "Week of Month",
+            options=week_options,
+            default=week_options,
+            help="Compare specific weeks within the selected month"
+        )
+        week_filter = week_filter if week_filter else week_options
 
 with col2:
     day_filter = st.multiselect(
         "Day of Week",
         options=day_options,
-        default=day_options
+        default=[]
     )
-    # If empty, use all days
     day_filter = day_filter if day_filter else day_options
 
 with col3:
     service_filter = st.multiselect(
         "Service Type",
         options=color_lines,
-        default=color_lines
+        default=[]
     )
-    # If empty, use all service types
     service_filter = service_filter if service_filter else color_lines
 
 with col4:
     route_filter = st.multiselect(
         "Route",
         options=route_options,
-        default=route_options
+        default=[]
     )
-    # If empty, use all routes
     route_filter = route_filter if route_filter else route_options
 
-# Apply filters - no need for additional checks since we've handled empty cases above
+# Apply filters
 filtered_df = df[
     (df['month'].isin(month_filter)) &
     (df['day_of_week'].isin(day_filter)) &
@@ -125,6 +138,11 @@ filtered_df = df[
     (df['route_no'].isin(route_filter))
 ]
 
+# Additional weekly filtering if exactly one month is selected
+if len(month_filter) == 1 and 'week_filter' in locals():
+    filtered_df = filtered_df[
+        filtered_df['running_date'].dt.isocalendar().week.isin(week_filter)
+    ]
 # Metrics Section
 st.markdown("### Key Performance Indicators")
 col1, col2, col3, col4 = st.columns(4)
@@ -202,6 +220,38 @@ with st.container():
             labels={'total_amount': 'Average Revenue (₹)', 'day_of_week': 'Day of Week'}
         )
         st.plotly_chart(fig, use_container_width=True)
+
+# Weekly Comparison Visualization
+if len(month_filter) == 1 and 'week_filter' in locals() and len(week_filter) > 1:
+    st.markdown("#### Weekly Performance Comparison")
+    
+    # Prepare weekly data
+    weekly_comparison = filtered_df.groupby(
+        [filtered_df['running_date'].dt.isocalendar().week, 'day_of_week']
+    ).agg({
+        'total_amount': 'sum',
+        'total_count': 'sum'
+    }).reset_index()
+    
+    # Sort by week and day order
+    weekly_comparison = weekly_comparison.sort_values(['week', 'day_of_week'], 
+                                                   key=lambda x: x.map({k: v for v, k in enumerate(week_options + day_options)}))
+    
+    # Create comparison chart
+    fig = px.bar(
+        weekly_comparison,
+        x='day_of_week',
+        y='total_amount',
+        color='week',
+        barmode='group',
+        category_orders={"day_of_week": day_options},
+        title=f"Weekly Revenue Comparison for {month_filter[0]}",
+        labels={'total_amount': 'Revenue (₹)', 'day_of_week': 'Day of Week'}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+
 
 # Route Performance
 st.markdown("#### Route Performance")
