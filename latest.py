@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime
-import numpy as np
+
 # Configure page settings
 st.set_page_config(
-    page_title="Public Transport Analytics Dashboard",
+    page_title="Transport Analytics Dashboard",
     page_icon="🚍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -33,9 +32,6 @@ st.markdown("""
         font-weight: 700;
         color: #222;
     }
-    .header {
-        margin-bottom: 20px;
-    }
     .plot-container {
         background-color: white;
         padding: 15px;
@@ -46,290 +42,194 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Load and prepare data
 @st.cache_data
 def load_data():
     # Read Excel file
-    # Assuming the Excel file is named 'smart_city_dashboard_datewise_data.xlsx' and is in a 'data' subdirectory
-    try:
-        df = pd.read_excel("data/smart_city_dashboard_datewise_data.xlsx")
-    except FileNotFoundError:
-        st.error("Error: Data file not found. Please make sure 'smart_city_dashboard_datewise_data.xlsx' is in a 'data' subdirectory.")
-        st.stop()
-
-    # Convert date and time columns
-    df['running_date'] = pd.to_datetime(df['running_date'], errors='coerce')
-    # Drop rows with invalid dates
-    df.dropna(subset=['running_date'], inplace=True)
-
+    df = pd.read_excel("data/smart_city_dashboard_datewise_data.xlsx")
+    
+    # Convert and create columns
+    df['running_date'] = pd.to_datetime(df['running_date'])
+    df['month'] = df['running_date'].dt.month_name()
     df['day_of_week'] = df['running_date'].dt.day_name()
-    # Convert time columns, handling potential errors
-    try:
-        df['start_time'] = pd.to_datetime(df['start_time'].astype(str)).dt.time
-        df['end_time'] = pd.to_datetime(df['end_time'].astype(str)).dt.time
-    except Exception as e:
-        st.warning(f"Could not convert time columns. Please check their format. Error: {e}")
-        # Continue without time columns or handle as needed
-
-    # Ensure numeric types and calculate metrics, handling potential errors
-    numeric_cols = ['total_amount', 'travel_distance', 'total_count']
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # Calculate Epkm only if travel_distance is not zero to avoid division by zero
-    df['Epkm'] = df['total_amount'] / df['travel_distance']
-
-    # Replace infinite values (division by zero) with 0
-    df['Epkm'] = df['Epkm'].replace([np.inf, -np.inf], 0)
-
-    # Replace NaN values (from division with NaN or other issues) with 0
-    df['Epkm'] = df['Epkm'].fillna(0)
-
-    # Round the final Epkm values
-    df['Epkm'] = df['Epkm'].round(2)
-
     df['service_type'] = df['color_line']
-
-    # Drop rows with NaN in critical numeric columns after coercion
-    df.dropna(subset=numeric_cols + ['Epkm'], inplace=True)
-
-    if df.empty:
-        st.error("Error: No valid data remaining after processing. Please check your data file for correct formats.")
-        st.stop()
-
+    df['Epkm'] = (df['total_amount'] / df['travel_distance']).round(2)
+    
     return df
 
 # Load data
 df = load_data()
 
+# Get filter options
+available_months = sorted(df['month'].unique(), 
+                        key=lambda x: datetime.strptime(x, "%B").month)
+day_options = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 
+              'Friday', 'Saturday', 'Sunday']
+color_lines = df['service_type'].unique()
+route_options = df['route_no'].unique()
+
 # Dashboard Header
-st.title("🚍 Public Transport Performance Dashboard")
+st.title("🚍 Transport Performance Dashboard")
 st.markdown("""
 <div style="margin-bottom: 30px;">
-    Comprehensive analysis of passenger traffic, revenue, and operational efficiency
+    Comprehensive analysis of passenger traffic and revenue performance
 </div>
 """, unsafe_allow_html=True)
 
+# Filters Section
 # Filters Section
 st.markdown("### Filters")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    time_period = st.selectbox(
-        "Time Period",
-        ["Daily", "Weekly", "Monthly"],
-        index=0
+    month_filter = st.multiselect(
+        "Month",
+        options=available_months,
+        default=available_months,
+        help="Filter by month(s)"
     )
+    # If empty, use all months
+    month_filter = month_filter if month_filter else available_months
 
 with col2:
-    # Use df['service_type'].unique() directly after loading data
-    color_lines = df['service_type'].unique()
-    color_filter = st.multiselect(
-        "Service Type (Color Line)",
-        options=color_lines,
-        default=[] # Default to all selected
-    )
-
-with col3:
-    day_options = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    # Ensure only days present in the filtered data are selected by default
-    present_days = df['day_of_week'].unique().tolist()
     day_filter = st.multiselect(
         "Day of Week",
         options=day_options,
-        default=[] # Default to all present days
+        default=day_options
     )
+    # If empty, use all days
+    day_filter = day_filter if day_filter else day_options
+
+with col3:
+    service_filter = st.multiselect(
+        "Service Type",
+        options=color_lines,
+        default=color_lines
+    )
+    # If empty, use all service types
+    service_filter = service_filter if service_filter else color_lines
 
 with col4:
-    # Use df['route_no'].unique() directly after loading data
-    route_options = df['route_no'].unique()
     route_filter = st.multiselect(
         "Route",
         options=route_options,
-        default=[] # Default to all selected
+        default=route_options
     )
+    # If empty, use all routes
+    route_filter = route_filter if route_filter else route_options
 
-# Apply filters - Modified logic to handle empty multiselects
-# Start with a condition that includes all rows
-filter_condition = pd.Series(True, index=df.index)
+# Apply filters - no need for additional checks since we've handled empty cases above
+filtered_df = df[
+    (df['month'].isin(month_filter)) &
+    (df['day_of_week'].isin(day_filter)) &
+    (df['service_type'].isin(service_filter)) &
+    (df['route_no'].isin(route_filter))
+]
 
-# Apply color filter if not empty
-if color_filter:
-    filter_condition = filter_condition & (df['service_type'].isin(color_filter))
-
-# Apply day filter if not empty
-if day_filter:
-    filter_condition = filter_condition & (df['day_of_week'].isin(day_filter))
-
-# Apply route filter if not empty
-if route_filter:
-    filter_condition = filter_condition & (df['route_no'].isin(route_filter))
-
-# Apply the combined filter condition
-filtered_df = df[filter_condition].copy()
-
-
-# Check if filtered_df is empty after applying filters
-if filtered_df.empty:
-    st.warning("No data available for the selected filters.")
-    st.stop() # Stop execution if no data matches filters
-
-
-# Calculate summary metrics
-total_passengers = filtered_df['total_count'].sum()
-total_revenue = filtered_df['total_amount'].sum()
-total_distance = filtered_df['travel_distance'].sum()
-avg_epkm = filtered_df['Epkm'].mean() if not filtered_df['Epkm'].empty else 0 # Handle case where Epkm might be empty after filtering
-
-
-# Display Key Metrics
+# Metrics Section
 st.markdown("### Key Performance Indicators")
-metric_cols = st.columns(4)
+col1, col2, col3, col4 = st.columns(4)
 
-with metric_cols[0]:
+with col1:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Total Passengers</div>
-            <div class="metric-value">{total_passengers:,}</div>
+            <div class="metric-value">{filtered_df['total_count'].sum():,}</div>
         </div>
     """, unsafe_allow_html=True)
 
-with metric_cols[1]:
+with col2:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Total Revenue</div>
-            <div class="metric-value">₹{total_revenue:,.0f}</div>
+            <div class="metric-value">₹{filtered_df['total_amount'].sum():,.0f}</div>
         </div>
     """, unsafe_allow_html=True)
 
-with metric_cols[2]:
+with col3:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Total Distance</div>
-            <div class="metric-value">{total_distance:,} km</div>
+            <div class="metric-value">{filtered_df['travel_distance'].sum():,} km</div>
         </div>
     """, unsafe_allow_html=True)
 
-with metric_cols[3]:
+with col4:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Avg EPKM</div>
-            <div class="metric-value">₹{avg_epkm:.2f}</div>
+            <div class="metric-value">₹{filtered_df['Epkm'].mean():.2f}</div>
         </div>
     """, unsafe_allow_html=True)
 
-# Visualizations Section
-st.markdown("---")
+# Visualization Section
 st.markdown("## Performance Analysis")
 
-# Row 1: Day-wise and Route Performance
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("#### Passenger Traffic by Day")
-    # Ensure all days of the week are considered, even if no data, for consistent x-axis
-    day_stats = filtered_df.groupby('day_of_week', observed=True)['total_count'].sum().reindex(day_options).fillna(0)
-    fig = px.bar(
-        day_stats,
-        x=day_stats.index, # Explicitly set x to index for correct ordering
-        y=day_stats.values,
-        color=day_stats.values,
-        color_continuous_scale='Blues',
-        labels={'y': 'Passenger Count', 'x': 'Day of Week'} # Correct labels
-    )
-    fig.update_layout(showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    st.markdown("#### Top/Bottom Routes by Passengers")
-    # Calculate route stats only if filtered_df is not empty
-    if not filtered_df.empty:
-        route_stats = filtered_df.groupby('route_no')['total_count'].sum()
-        # Ensure there are enough routes to display top/bottom 5
-        if len(route_stats) >= 10:
-            top_5_routes = route_stats.nlargest(5)
-            bottom_5_routes = route_stats.nsmallest(5)
-
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=top_5_routes.index,
-                y=top_5_routes.values,
-                name='Top 5',
-                marker_color='#1f77b4'
-            ))
-            fig.add_trace(go.Bar(
-                x=bottom_5_routes.index,
-                y=bottom_5_routes.values,
-                name='Bottom 5',
-                marker_color='#ff7f0e'
-            ))
-            fig.update_layout(barmode='group', title='Top 5 and Bottom 5 Routes by Passengers')
-            st.plotly_chart(fig, use_container_width=True)
-        elif not route_stats.empty:
-             # If less than 10 routes, just show all routes
-            fig = px.bar(route_stats, x=route_stats.index, y=route_stats.values, title='Passenger Count by Route')
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No route data available for the selected filters.")
-    else:
-        st.info("No route data available for the selected filters.")
-
-
-# Row 2: Time Series and Efficiency Metrics
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("#### Revenue Trend Over Time")
-    if time_period == "Daily":
-        # Grouping by date and summing revenue
-        time_series = filtered_df.groupby('running_date')['total_amount'].sum().reset_index()
-        fig = px.line(time_series, x='running_date', y='total_amount', labels={'total_amount': 'Revenue (₹)', 'running_date': 'Date'}, title='Daily Revenue Trend')
-    elif time_period == "Weekly":
-        # Grouping by week and summing revenue
-        # Ensure week is treated as categorical for plotting if not sorted chronologically
-        weekly = filtered_df.groupby(filtered_df['running_date'].dt.isocalendar().week)['total_amount'].sum().reset_index()
-        fig = px.line(weekly, x='week', y='total_amount', labels={'total_amount': 'Revenue (₹)', 'week': 'Week Number'}, title='Weekly Revenue Trend')
-    else:  # Monthly
-        # Grouping by year and month to ensure correct chronological order
-        monthly = filtered_df.groupby([filtered_df['running_date'].dt.year, filtered_df['running_date'].dt.month])['total_amount'].sum().reset_index()
-        monthly['YearMonth'] = pd.to_datetime(monthly['running_date'].dt.year.astype(str) + '-' + monthly['running_date'].dt.month.astype(str) + '-01') # Create a datetime for sorting and plotting
-        monthly = monthly.sort_values('YearMonth')
-        fig = px.line(monthly, x='YearMonth', y='total_amount', labels={'total_amount': 'Revenue (₹)', 'YearMonth': 'Month'}, title='Monthly Revenue Trend')
-    st.plotly_chart(fig, use_container_width=True)
-
-with col2:
-    st.markdown("#### Efficiency by Route (EPKM)")
-    # Calculate epkm stats only if filtered_df is not empty
-    if not filtered_df.empty:
-        epkm_stats = filtered_df.groupby('route_no')['Epkm'].mean().sort_values()
-        fig = px.bar(
-            epkm_stats,
-            orientation='h',
-            color=epkm_stats.values,
-            color_continuous_scale='Viridis',
-            labels={'value': 'EPKM (₹/km)', 'index': 'Route'},
-            title='Average EPKM by Route'
+# Revenue Analysis
+with st.container():
+    st.markdown("#### Revenue Trends")
+    
+    tab1, tab2 = st.tabs(["Monthly View", "Daily Pattern"])
+    
+    with tab1:
+        monthly_revenue = filtered_df.groupby('month').agg({
+            'total_amount': 'sum',
+            'total_count': 'sum'
+        }).reindex(available_months).reset_index()
+        
+        fig = px.line(
+            monthly_revenue,
+            x='month',
+            y='total_amount',
+            markers=True,
+            title="Monthly Revenue Trend",
+            labels={'total_amount': 'Revenue (₹)', 'month': 'Month'}
         )
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No EPKM data available for the selected filters.")
+    
+    with tab2:
+        daily_revenue = filtered_df.groupby(['month', 'day_of_week']).agg({
+            'total_amount': 'mean'
+        }).reset_index()
+        
+        fig = px.bar(
+            daily_revenue,
+            x='day_of_week',
+            y='total_amount',
+            color='month',
+            barmode='group',
+            category_orders={"day_of_week": day_options},
+            title="Average Daily Revenue by Month",
+            labels={'total_amount': 'Average Revenue (₹)', 'day_of_week': 'Day of Week'}
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
+# Route Performance
+st.markdown("#### Route Performance")
+col1, col2 = st.columns(2)
 
-# Data Table Section
-st.markdown("---")
-st.header("Detailed Data")
+with col1:
+    route_passengers = filtered_df.groupby('route_no')['total_count'].sum().nlargest(10)
+    fig = px.bar(
+        route_passengers,
+        title="Top Routes by Passenger Count",
+        labels={'value': 'Passengers', 'index': 'Route'}
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
-with st.expander("View Raw Data Table"):
-    st.dataframe(filtered_df)
-
+with col2:
+    route_epkm = filtered_df.groupby('route_no')['Epkm'].mean().nlargest(10)
+    fig = px.bar(
+        route_epkm,
+        title="Top Routes by Revenue Efficiency (EPKM)",
+        labels={'value': 'EPKM (₹/km)', 'index': 'Route'}
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 # Export Option
-st.markdown("---")
 with st.expander("Export Data"):
-    st.write(f"Filtered dataset contains {len(filtered_df)} records")
     st.download_button(
-        "Download as CSV",
+        "Download Filtered Data",
         filtered_df.to_csv(index=False).encode('utf-8'),
-        "transport_data.csv",
+        "filtered_transport_data.csv",
         "text/csv"
     )
