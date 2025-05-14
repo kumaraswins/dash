@@ -50,7 +50,7 @@ def load_data():
     # Read Excel file
     # Assuming the Excel file is named 'smart_city_dashboard_datewise_data.xlsx' and is in a 'data' subdirectory
     try:
-        df = pd.read_excel("data/city_dashboard_datewise_data.xlsx")
+        df = pd.read_excel("data/smart_city_dashboard_datewise_data.xlsx")
     except FileNotFoundError:
         st.error("Error: Data file not found. Please make sure 'smart_city_dashboard_datewise_data.xlsx' is in a 'data' subdirectory.")
         st.stop()
@@ -110,7 +110,7 @@ color_lines = df['service_type'].unique()
 route_options = df['route_no'].unique()
 
 # Dashboard Header
-st.title("🚍 Goa Transport Performance Dashboard")
+st.title("🚍 FTransport Performance Dashboard")
 st.markdown("""
 <div style="margin-bottom: 30px;">
     Comprehensive analysis of passenger traffic and revenue performance
@@ -258,13 +258,14 @@ st.markdown("## Performance Analysis")
 # Revenue Analysis
 with st.container():
     # Add new tabs for analysis
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Monthly View",
-        "Daily Pattern",
-        "Schedule-wise EPKM",
-        "Trips per Schedule by Date (Bar Chart)",
-        "Route Performance"
-    ])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([  # Added tab6
+    "Monthly View",
+    "Daily Pattern",
+    "Schedule-wise EPKM",
+    "Trips per Schedule by Date (Bar Chart)",
+    "Route Performance",
+    "Revenue Trends Comparison"  # New tab
+])
 
     with tab1:
         st.markdown("#### Monthly Revenue Trend")
@@ -285,11 +286,7 @@ with st.container():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("""
-            **Analysis:** This chart shows the total revenue generated each month. Observe the overall trend – is it increasing, decreasing, or stable?
-            Look for any significant peaks or dips and consider potential reasons, such as seasonal changes, holidays, or operational disruptions.
-            Comparing the revenue trend with passenger count trend (if available) can provide deeper insights.
-            """)
+          
 
             st.markdown("---")
             st.markdown("##### Drill Down: Daily Trend for a Specific Month")
@@ -344,12 +341,7 @@ with st.container():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("""
-            **Analysis:** This bar chart illustrates the average revenue generated on each day of the week, broken down by month.
-            Identify which days of the week typically generate the most or least revenue.
-            Compare the daily patterns across different months to see if there are consistent trends or monthly variations.
-            This can help in understanding passenger behavior and planning service levels.
-            """)
+            
 
             st.markdown("---")
             st.markdown("##### Drill Down: Filter by Specific Day(s) of Week")
@@ -403,12 +395,7 @@ with st.container():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown("""
-            **Analysis:** This chart shows the average revenue generated per kilometer for each schedule number (EPKM).
-            Schedules with higher EPKM are generally more revenue-efficient.
-            Identify the top and bottom performing schedules in terms of EPKM.
-            Investigate factors that might contribute to high or low EPKM for specific schedules, such as route characteristics, passenger load, or operational efficiency.
-            """)
+            
 
             st.markdown("---")
             st.markdown("##### Drill Down: Compare Specific Schedules")
@@ -496,13 +483,6 @@ with st.container():
             st.markdown("##### Data Table for Trips per Schedule")
             st.dataframe(trips_per_schedule_day_bar)
 
-            st.markdown("""
-            **Analysis:** This bar chart visualizes the total number of trips completed by each schedule on a daily basis.
-            Each color represents a different schedule number.
-            Observe the consistency of trip counts for each schedule over time. Are there days where schedules completed fewer trips than usual?
-            This can help identify potential operational issues or days with lower demand for specific schedules.
-            The table below provides the raw data used for this chart.
-            """)
 
         else:
             st.info("No data available for trips per schedule analysis with the selected route(s) and schedule(s).")
@@ -582,11 +562,7 @@ with st.container():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                st.markdown("""
-                **Analysis:** This chart highlights the routes with the highest passenger counts.
-                These are your most popular routes in terms of ridership.
-                Understanding the characteristics of these routes (e.g., areas served, frequency) can inform service planning.
-                """)
+                
             else:
                 st.info("No data available for route passenger performance.")
 
@@ -601,15 +577,104 @@ with st.container():
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-                st.markdown("""
-                **Analysis:** This chart shows the routes with the highest average revenue per kilometer (EPKM).
-                These routes are the most efficient at generating revenue based on the distance covered.
-                Compare this with the passenger count chart to see if high ridership routes are also high EPKM routes, or if some routes are efficient despite lower passenger numbers.
-                """)
+                
             else:
                 st.info("No data available for route EPKM efficiency.")
 
-      
+    with tab6:
+        st.markdown("#### Comparative Daily Revenue Analysis")
+        
+        if not filtered_df.empty:
+            # Create monthly and weekly aggregates
+            monthly_avg = filtered_df.groupby(
+                pd.Grouper(key='running_date', freq='M')
+            )['total_amount'].mean().reset_index()
+            monthly_avg['period_type'] = 'Monthly'
+            monthly_avg['period_label'] = monthly_avg['running_date'].dt.strftime('%b %Y')
+            
+            weekly_avg = filtered_df.groupby(
+                pd.Grouper(key='running_date', freq='W-MON')
+            )['total_amount'].mean().reset_index()
+            weekly_avg['period_type'] = 'Weekly'
+            weekly_avg['period_label'] = weekly_avg['running_date'].dt.strftime('Week of %b %d, %Y')
+            
+            # Combine data
+            combined_data = pd.concat([monthly_avg, weekly_avg])
+            
+            # Create date range selector
+            min_date = filtered_df['running_date'].min()
+            max_date = filtered_df['running_date'].max()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input(
+                    "Start Date",
+                    value=min_date,
+                    min_value=min_date,
+                    max_value=max_date
+                )
+            with col2:
+                end_date = st.date_input(
+                    "End Date",
+                    value=max_date,
+                    min_value=min_date,
+                    max_value=max_date
+                )
+            
+            # Filter data based on selection
+            combined_data = combined_data[
+                (combined_data['running_date'] >= pd.to_datetime(start_date)) &
+                (combined_data['running_date'] <= pd.to_datetime(end_date))
+            ]
+            
+            # Visualization
+            fig = px.line(
+                combined_data,
+                x='running_date',
+                y='total_amount',
+                color='period_type',
+                line_dash='period_type',
+                hover_name='period_label',
+                hover_data={
+                    'running_date': False,
+                    'total_amount': ':.2f',
+                    'period_type': False,
+                    'period_label': False
+                },
+                labels={
+                    'total_amount': 'Average Daily Revenue (₹)',
+                    'running_date': 'Date',
+                    'period_type': 'Aggregation Period'
+                },
+                title="Comparative Daily Revenue Trends"
+            )
+            
+            # Add range slider
+            fig.update_layout(
+                xaxis=dict(
+                    rangeselector=dict(
+                        buttons=list([
+                            dict(count=1, label="1m", step="month", stepmode="backward"),
+                            dict(count=3, label="3m", step="month", stepmode="backward"),
+                            dict(count=6, label="6m", step="month", stepmode="backward"),
+                            dict(step="all")
+                        ])
+                    ),
+                    rangeslider=dict(visible=True),
+                    type="date"
+                )
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Add explanatory text
+           
+            
+            # Optional: Show data table
+            with st.expander("View Raw Data"):
+                st.dataframe(combined_data.sort_values('running_date'))
+        else:
+            st.info("No data available for revenue trend comparison.")
 
 
 # Export Option
