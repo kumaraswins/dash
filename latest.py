@@ -127,7 +127,7 @@ with col2:
     color_filter = st.multiselect(
         "Service Type (Color Line)",
         options=color_lines,
-        default=color_lines # Default to all selected
+        default=[] # Default to all selected
     )
 
 with col3:
@@ -137,7 +137,7 @@ with col3:
     day_filter = st.multiselect(
         "Day of Week",
         options=day_options,
-        default=[day for day in day_options if day in present_days] # Default to all present days
+        default=[] # Default to all present days
     )
 
 with col4:
@@ -146,7 +146,7 @@ with col4:
     route_filter = st.multiselect(
         "Route",
         options=route_options,
-        default=route_options # Default to all selected
+        default=[] # Default to all selected
     )
 
 # Apply filters - Modified logic to handle empty multiselects
