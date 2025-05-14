@@ -110,7 +110,7 @@ color_lines = df['service_type'].unique()
 route_options = df['route_no'].unique()
 
 # Dashboard Header
-st.title("🚍 FTransport Performance Dashboard")
+st.title("🚍 KTCL Performance Dashboard")
 st.markdown("""
 <div style="margin-bottom: 30px;">
     Comprehensive analysis of passenger traffic and revenue performance
