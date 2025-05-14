@@ -204,22 +204,82 @@ if filtered_df.empty:
 
 # Metrics Section
 st.markdown("### Key Performance Indicators")
+# col1, col2, col3, col4 = st.columns(4)
+
+# # Calculate metrics only if filtered_df is not empty
+# if not filtered_df.empty:
+#     total_passengers = filtered_df['total_count'].sum()
+#     total_revenue = filtered_df['total_amount'].sum()
+#     total_distance = filtered_df['travel_distance'].sum()
+#     avg_epkm = filtered_df['Epkm'].mean() if not filtered_df['Epkm'].isnull().all() else 0 # Handle case where Epkm might be empty after filtering
+# else:
+#     total_passengers = 0
+#     total_revenue = 0
+#     total_distance = 0
+#     avg_epkm = 0
+
+
 col1, col2, col3, col4 = st.columns(4)
 
 # Calculate metrics only if filtered_df is not empty
 if not filtered_df.empty:
+    total_trips = filtered_df.shape[0] # Added total trips KPI
     total_passengers = filtered_df['total_count'].sum()
     total_revenue = filtered_df['total_amount'].sum()
     total_distance = filtered_df['travel_distance'].sum()
+    # Calculate average running time if column exists and is numeric
+    average_running_time = filtered_df['running_time'].mean() if 'running_time' in filtered_df.columns and pd.api.types.is_numeric_dtype(filtered_df['running_time']) and not filtered_df['running_time'].isnull().all() else 0 # Added average running time
     avg_epkm = filtered_df['Epkm'].mean() if not filtered_df['Epkm'].isnull().all() else 0 # Handle case where Epkm might be empty after filtering
 else:
+    total_trips = 0 # Added
     total_passengers = 0
     total_revenue = 0
     total_distance = 0
+    average_running_time = 0 # Added
     avg_epkm = 0
 
+# with col1:
+#     st.markdown(f"""
+#         <div class="metric-card">
+#             <div class="metric-title">Total Passengers</div>
+#             <div class="metric-value">{total_passengers:,}</div>
+#         </div>
+#     """, unsafe_allow_html=True)
+
+# with col2:
+#     st.markdown(f"""
+#         <div class="metric-card">
+#             <div class="metric-title">Total Revenue</div>
+#             <div class="metric-value">₹{total_revenue:,.0f}</div>
+#         </div>
+#     """, unsafe_allow_html=True)
+
+# with col3:
+#     st.markdown(f"""
+#         <div class="metric-card">
+#             <div class="metric-title">Total Distance</div>
+#             <div class="metric-value">{total_distance:,} km</div>
+#         </div>
+#     """, unsafe_allow_html=True)
+
+# with col4:
+#     st.markdown(f"""
+#         <div class="metric-card">
+#             <div class="metric-title">Avg EPKM</div>
+#             <div class="metric-value">₹{avg_epkm:.2f}</div>
+#         </div>
+#     """, unsafe_allow_html=True)
+col1, col2, col3, col4, col5, col6 = st.columns(6) # Adjusted to 6 columns for more KPIs
 
 with col1:
+    st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-title">Total Trips</div>
+            <div class="metric-value">{total_trips:,}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+with col2:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Total Passengers</div>
@@ -227,7 +287,7 @@ with col1:
         </div>
     """, unsafe_allow_html=True)
 
-with col2:
+with col3:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Total Revenue</div>
@@ -235,22 +295,29 @@ with col2:
         </div>
     """, unsafe_allow_html=True)
 
-with col3:
+with col4:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Total Distance</div>
-            <div class="metric-value">{total_distance:,} km</div>
+            <div class="metric-value">{total_distance:,.0f} km</div>
         </div>
     """, unsafe_allow_html=True)
 
-with col4:
+with col5:
+     st.markdown(f"""
+         <div class="metric-card">
+             <div class="metric-title">Avg Running Time</div>
+             <div class="metric-value">{average_running_time:.2f} min</div>
+         </div>
+     """, unsafe_allow_html=True) # Added Avg Running Time
+
+with col6:
     st.markdown(f"""
         <div class="metric-card">
             <div class="metric-title">Avg EPKM</div>
             <div class="metric-value">₹{avg_epkm:.2f}</div>
         </div>
     """, unsafe_allow_html=True)
-
 # Visualization Section
 st.markdown("## Performance Analysis")
 
@@ -581,118 +648,7 @@ with st.container():
                 st.info("No data available for route EPKM efficiency.")
 
     with tab6: # New tab for Comparative Daily Revenue Analysis
-        # st.markdown("#### Comparative Daily Revenue Analysis")
-
-        # # Ensure data exists before calculation and plotting
-        # if not filtered_df.empty:
-        #     # Create monthly and weekly aggregates
-        #     monthly_avg = filtered_df.groupby(
-        #         pd.Grouper(key='running_date', freq='M')
-        #     )['total_amount'].mean().reset_index()
-        #     monthly_avg['period_type'] = 'Monthly'
-        #     monthly_avg['period_label'] = monthly_avg['running_date'].dt.strftime('%b %Y')
-
-        #     weekly_avg = filtered_df.groupby(
-        #         pd.Grouper(key='running_date', freq='W-MON')
-        #     )['total_amount'].mean().reset_index()
-        #     weekly_avg['period_type'] = 'Weekly'
-        #     weekly_avg['period_label'] = weekly_avg['running_date'].dt.strftime('Week of %b %d, %Y')
-
-        #     # Combine data
-        #     combined_data = pd.concat([monthly_avg, weekly_avg])
-
-        #     # Create date range selector
-        #     min_date = filtered_df['running_date'].min()
-        #     max_date = filtered_df['running_date'].max()
-
-        #     col1, col2 = st.columns(2)
-        #     with col1:
-        #         start_date = st.date_input(
-        #             "Start Date",
-        #             value=min_date,
-        #             min_value=min_date,
-        #             max_value=max_date,
-        #             key='comp_start_date' # Unique key
-        #         )
-        #     with col2:
-        #         end_date = st.date_input(
-        #             "End Date",
-        #             value=max_date,
-        #             min_value=min_date,
-        #             max_value=max_date,
-        #             key='comp_end_date' # Unique key
-        #         )
-
-        #     # Filter data based on selection
-        #     combined_data = combined_data[
-        #         (combined_data['running_date'] >= pd.to_datetime(start_date)) &
-        #         (combined_data['running_date'] <= pd.to_datetime(end_date))
-        #     ]
-
-        #     # Visualization
-        #     if not combined_data.empty:
-        #         fig = px.line(
-        #             combined_data,
-        #             x='running_date',
-        #             y='total_amount',
-        #             color='period_type',
-        #             line_dash='period_type',
-        #             hover_name='period_label',
-        #             hover_data={
-        #                 'running_date': False,
-        #                 'total_amount': ':.2f',
-        #                 'period_type': False,
-        #                 'period_label': False
-        #             },
-        #             labels={
-        #                 'total_amount': 'Average Daily Revenue (₹)',
-        #                 'running_date': 'Date',
-        #                 'period_type': 'Aggregation Period'
-        #             },
-        #             title="Comparative Daily Revenue Trends"
-        #         )
-
-        #         # Add range slider
-        #         fig.update_layout(
-        #             xaxis=dict(
-        #                 rangeselector=dict(
-        #                     buttons=list([
-        #                         dict(count=1, label="1m", step="month", stepmode="backward"),
-        #                         dict(count=3, label="3m", step="month", stepmode="backward"),
-        #                         dict(count=6, label="6m", step="month", stepmode="backward"),
-        #                         dict(step="all")
-        #                     ])
-        #                 ),
-        #                 rangeslider=dict(visible=True),
-        #                 type="date"
-        #             )
-        #         )
-
-        #         st.plotly_chart(fig, use_container_width=True)
-
-        #         # Add explanatory text
-        #         st.markdown("""
-        #         **How to use this analysis:**
-        #         - Compare the blue (monthly) and red (weekly) trend lines
-        #         - Use the date range selectors above to focus on specific periods
-        #         - Hover over data points to see exact values and time periods
-        #         - Use the range slider below the chart to zoom in/out
-
-        #         **Key insights to look for:**
-        #         - Consistency between weekly and monthly trends
-        #         - Seasonal patterns visible in monthly data
-        #         - Short-term fluctuations visible in weekly data
-        #         - Significant deviations between weekly and monthly averages
-        #         """)
-
-        #         # Optional: Show data table
-        #         with st.expander("View Raw Data"):
-        #             st.dataframe(combined_data.sort_values('running_date'))
-        #     else:
-        #         st.info("No data available for the selected date range.")
-
-        # else:
-        #     st.info("No data available for revenue trend comparison.")
+        
 
         st.markdown("#### Daily Passenger Trend Analysis")
     
