@@ -269,7 +269,7 @@ else:
 #             <div class="metric-value">₹{avg_epkm:.2f}</div>
 #         </div>
 #     """, unsafe_allow_html=True)
-col1, col2, col3, col4, col5, col6 = st.columns(6) # Adjusted to 6 columns for more KPIs
+col1, col2, col3, col4, col6 = st.columns(5) # Adjusted to 6 columns for more KPIs
 
 with col1:
     st.markdown(f"""
@@ -303,13 +303,6 @@ with col4:
         </div>
     """, unsafe_allow_html=True)
 
-with col5:
-     st.markdown(f"""
-         <div class="metric-card">
-             <div class="metric-title">Avg Running Time</div>
-             <div class="metric-value">{average_running_time:.2f} min</div>
-         </div>
-     """, unsafe_allow_html=True) # Added Avg Running Time
 
 with col6:
     st.markdown(f"""
@@ -324,13 +317,14 @@ st.markdown("## Performance Analysis")
 # Revenue Analysis
 with st.container():
     # Add new tabs for analysis
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([ # Added tab6
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([ # Added tab6
         "Monthly View",
         "Daily Pattern",
         "Schedule-wise EPKM",
-        "Trips per Schedule by Date (Bar Chart)",
+        "Trips per Schedule by Date",
         "Route Performance",
-        "Daily Passenger Trend" # New tab title
+        "Daily Passenger Trend", # New tab title
+        "EPKM Analysis" # New tab title
     ])
 
     with tab1:
@@ -442,60 +436,183 @@ with st.container():
         else:
             st.info("No data available for daily revenue pattern.")
 
-    with tab3:
-        st.markdown("#### Average EPKM by Schedule")
-        # Ensure data exists before plotting
+    # Add this to your existing tabs list
+    with tab3:  # Assuming tab3 is your EPKM analysis tab
+        st.markdown("""
+        <div style="border-bottom: 1px solid #e0e0e0; padding-bottom: 10px; margin-bottom: 25px;">
+            <h2 style="color: #2c3e50; font-weight: 600;">Schedule Efficiency Analysis</h2>
+            <p style="color: #7f8c8d; font-size: 15px;">Detailed analysis of revenue efficiency per schedule</p>
+        </div>
+        """, unsafe_allow_html=True)
+
         if not filtered_df.empty:
-            # Calculate average EPKM per schedule number
-            schedule_epkm = filtered_df.groupby('schedule_number')['Epkm'].mean().reset_index()
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                # Filter controls
+                min_trips = st.slider(
+                    "Minimum Trips Filter",
+                    min_value=0,
+                    max_value=int(filtered_df['trip_number'].max()),
+                    value=5,
+                    help="Filter schedules with at least this many trips"
+                )
+                
+                show_annotations = st.checkbox(
+                    "Show Data Labels",
+                    value=True,
+                    help="Display EPKM values on bars"
+                )
+                
+                compare_mode = st.radio(
+                    "Comparison Mode",
+                    options=["Absolute Values", "System Average"],
+                    index=0,
+                    horizontal=True
+                )
 
-            # Sort by average EPKM for better visualization (optional)
-            schedule_epkm = schedule_epkm.sort_values('Epkm', ascending=False)
-
-            fig = px.bar(
-                schedule_epkm,
-                x='schedule_number',
-                y='Epkm',
-                title="Average EPKM per Schedule Number",
-                labels={'Epkm': 'Average EPKM (₹/km)', 'schedule_number': 'Schedule Number'}
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                # Calculate schedule statistics
+                schedule_stats = filtered_df.groupby('schedule_number').agg(
+                    avg_epkm=('Epkm', 'mean'),
+                    total_trips=('trip_number', 'count'),
+                    total_revenue=('total_amount', 'sum'),
+                    total_distance=('travel_distance', 'sum')
+                ).reset_index()
+                
+                # Apply minimum trips filter
+                schedule_stats = schedule_stats[schedule_stats['total_trips'] >= min_trips]
+                
+                if not schedule_stats.empty:
+                    # Create visualization
+                    fig = px.bar(
+                        schedule_stats.sort_values('avg_epkm', ascending=False),
+                        x='schedule_number',
+                        y='avg_epkm',
+                        color='avg_epkm',
+                        color_continuous_scale='Viridis',
+                        hover_data={
+                            'schedule_number': True,
+                            'avg_epkm': ':.2f',
+                            'total_trips': True,
+                            'total_revenue': ':.0f',
+                            'total_distance': ':.0f'
+                        },
+                        labels={
+                            'avg_epkm': 'Average EPKM (₹/km)',
+                            'schedule_number': 'Schedule Number'
+                        }
+                    )
+                    
+                    if compare_mode == "System Average":
+                        system_avg = filtered_df['Epkm'].mean()
+                        fig.add_hline(
+                            y=system_avg,
+                            line_dash="dot",
+                            line_color="#e74c3c",
+                            annotation_text=f"System Average: ₹{system_avg:.2f}",
+                            annotation_position="bottom right"
+                        )
+                    
+                    if show_annotations:
+                        fig.update_traces(
+                            texttemplate='₹%{y:.2f}',
+                            textposition='outside'
+                        )
+                    
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis_title="Schedule Number",
+                        yaxis_title="Average EPKM (₹/km)",
+                        coloraxis_showscale=False,
+                        xaxis={'categoryorder': 'total descending'},
+                        hoverlabel=dict(
+                            bgcolor="white",
+                            font_size=12,
+                            font_family="Arial"
+                        )
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                    
+                    # Performance summary
+                    st.markdown("""
+                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                            <div style="background-color: white; padding: 10px; border-radius: 5px; border-left: 3px solid #2ecc71;">
+                                <div style="font-size: 12px; color: #7f8c8d;">Top Schedule</div>
+                                <div style="font-size: 18px; font-weight: bold; color: #2c3e50;">{}</div>
+                                <div style="font-size: 12px; color: #7f8c8d;">₹{:.2f} EPKM</div>
+                            </div>
+                            <div style="background-color: white; padding: 10px; border-radius: 5px; border-left: 3px solid #f39c12;">
+                                <div style="font-size: 12px; color: #7f8c8d;">Median Schedule</div>
+                                <div style="font-size: 18px; font-weight: bold; color: #2c3e50;">{}</div>
+                                <div style="font-size: 12px; color: #7f8c8d;">₹{:.2f} EPKM</div>
+                            </div>
+                            <div style="background-color: white; padding: 10px; border-radius: 5px; border-left: 3px solid #e74c3c;">
+                                <div style="font-size: 12px; color: #7f8c8d;">Bottom Schedule</div>
+                                <div style="font-size: 18px; font-weight: bold; color: #2c3e50;">{}</div>
+                                <div style="font-size: 12px; color: #7f8c8d;">₹{:.2f} EPKM</div>
+                            </div>
+                        </div>
+                    </div>
+                    """.format(
+                        schedule_stats.nlargest(1, 'avg_epkm').iloc[0]['schedule_number'],
+                        schedule_stats.nlargest(1, 'avg_epkm').iloc[0]['avg_epkm'],
+                        schedule_stats['avg_epkm'].median(),
+                        schedule_stats['avg_epkm'].median(),
+                        schedule_stats.nsmallest(1, 'avg_epkm').iloc[0]['schedule_number'],
+                        schedule_stats.nsmallest(1, 'avg_epkm').iloc[0]['avg_epkm']
+                    ), unsafe_allow_html=True)
+                    
+                    # Trend analysis
+                    st.markdown("---")
+                    st.markdown("#### Schedule Performance Over Time")
+                    
+                    selected_schedules = st.multiselect(
+                        "Select Schedules to Compare",
+                        options=schedule_stats['schedule_number'].unique(),
+                        default=schedule_stats.nlargest(3, 'avg_epkm')['schedule_number'].tolist()
+                    )
+                    
+                    if selected_schedules:
+                        trend_data = filtered_df[filtered_df['schedule_number'].isin(selected_schedules)]
+                        
+                        fig = px.line(
+                            trend_data.groupby(['running_date', 'schedule_number'])['Epkm'].mean().reset_index(),
+                            x='running_date',
+                            y='Epkm',
+                            color='schedule_number',
+                            markers=True,
+                            labels={'Epkm': 'EPKM (₹/km)', 'running_date': 'Date'},
+                            color_discrete_sequence=px.colors.qualitative.Pastel
+                        )
+                        
+                        fig.update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            xaxis_title="Date",
+                            yaxis_title="EPKM (₹/km)",
+                            hovermode="x unified"
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                    
+                else:
+                    st.markdown("""
+                    <div style="text-align: center; padding: 40px; background-color: #f8f9fa; border-radius: 8px;">
+                        <h4 style="color: #7f8c8d;">No schedules meet the minimum trip threshold</h4>
+                        <p style="color: #bdc3c7;">Try adjusting the minimum trips filter</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="text-align: center; padding: 40px; background-color: #f8f9fa; border-radius: 8px;">
+                <h4 style="color: #7f8c8d;">No data available for analysis</h4>
+                <p style="color: #bdc3c7;">Try adjusting your filter criteria</p>
+            </div>
+            """, unsafe_allow_html=True)
 
             
-
-            st.markdown("---")
-            st.markdown("##### Drill Down: Compare Specific Schedules")
-            # Add a multiselect to filter by specific schedules
-            selected_schedules_drilldown = st.multiselect(
-                "Select Schedule(s) to Compare",
-                options=sorted(filtered_df['schedule_number'].unique().tolist()),
-                default=[],
-                key='schedule_compare_filter' # Unique key
-            )
-
-            if selected_schedules_drilldown:
-                # Filter data for the selected schedules
-                schedule_data_filtered = filtered_df[filtered_df['schedule_number'].isin(selected_schedules_drilldown)]
-
-                if not schedule_data_filtered.empty:
-                    # Calculate average EPKM for the selected schedules
-                    schedule_epkm_filtered = schedule_data_filtered.groupby('schedule_number')['Epkm'].mean().reset_index()
-
-                    fig_schedule_drilldown = px.bar(
-                        schedule_epkm_filtered,
-                        x='schedule_number',
-                        y='Epkm',
-                        title=f"Average EPKM for Selected Schedules ({', '.join(map(str, selected_schedules_drilldown))})",
-                        labels={'Epkm': 'Average EPKM (₹/km)', 'schedule_number': 'Schedule Number'}
-                    )
-                    st.plotly_chart(fig_schedule_drilldown, use_container_width=True)
-                else:
-                    st.info("No data available for the selected schedules with current filters.")
-
-
-        else:
-            st.info("No data available for schedule-wise EPKM analysis.")
-
     with tab4: # This is now the 'Trips per Schedule by Date (Bar Chart)' tab
         st.markdown("#### Total Trips per Schedule by Date ")
 
@@ -872,6 +989,240 @@ with st.container():
         
         else:
             st.info("No data available for passenger trend analysis.")
+    with tab7:
+        st.markdown("""
+        <div style="border-bottom: 1px solid #e0e0e0; padding-bottom: 10px; margin-bottom: 25px;">
+            <h2 style="color: #2c3e50; font-weight: 600;">EPKM Detailed Analysis</h2>
+            <p style="color: #7f8c8d; font-size: 15px;">Granular analysis of revenue efficiency metrics</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if not filtered_df.empty:
+            # Create analysis type selector
+            epkm_analysis_type = st.radio(
+                "Select Analysis Dimension",
+                options=["Temporal Trends", "Service Comparison", "Route Efficiency", "Outlier Detection"],
+                horizontal=True,
+                format_func=lambda x: f"📈 {x}",
+                key="epkm_analysis_type"
+            )
+            
+            st.markdown("---")
+
+            if epkm_analysis_type == "Temporal Trends":
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    time_granularity = st.selectbox(
+                        "Time Granularity",
+                        options=["Hourly", "Daily", "Weekly", "Monthly"],
+                        index=1,
+                        help="Select time resolution for analysis"
+                    )
+                    
+                    show_benchmark = st.checkbox(
+                        "Show System Average",
+                        value=True,
+                        help="Compare with overall system average"
+                    )
+
+                with col2:
+                    freq_map = {
+                        "Hourly": 'H',
+                        "Daily": 'D',
+                        "Weekly": 'W-MON',
+                        "Monthly": 'M'
+                    }
+                    
+                    epkm_temporal = filtered_df.groupby(pd.Grouper(
+                        key='running_date', 
+                        freq=freq_map[time_granularity]
+                    ))['Epkm'].mean().reset_index()
+                    
+                    fig = px.line(
+                        epkm_temporal,
+                        x='running_date',
+                        y='Epkm',
+                        markers=True,
+                        labels={'Epkm': 'EPKM (₹/km)', 'running_date': 'Time'},
+                        color_discrete_sequence=['#3498db']
+                    )
+                    
+                    if show_benchmark:
+                        system_avg = filtered_df['Epkm'].mean()
+                        fig.add_hline(
+                            y=system_avg,
+                            line_dash="dot",
+                            line_color="#e74c3c",
+                            annotation_text=f"System Average: ₹{system_avg:.2f}",
+                            annotation_position="bottom right"
+                        )
+                    
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis_title="Time Period",
+                        yaxis_title="Average EPKM (₹/km)",
+                        hovermode="x unified"
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+            elif epkm_analysis_type == "Service Comparison":
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    metric_type = st.radio(
+                        "Comparison Metric",
+                        options=["Mean", "Median", "95th Percentile"],
+                        index=0,
+                        horizontal=True
+                    )
+                    
+                    show_distribution = st.checkbox(
+                        "Show Distribution",
+                        value=True,
+                        help="Display violin plot distribution"
+                    )
+
+                with col2:
+                    agg_func = {
+                        "Mean": 'mean',
+                        "Median": 'median',
+                        "95th Percentile": lambda x: x.quantile(0.95)
+                    }[metric_type]
+                    
+                    service_epkm = filtered_df.groupby('service_type')['Epkm'].agg(agg_func).reset_index()
+                    
+                    if show_distribution:
+                        fig = px.violin(
+                            filtered_df,
+                            x='service_type',
+                            y='Epkm',
+                            box=True,
+                            points="all",
+                            color='service_type',
+                            labels={'Epkm': 'EPKM (₹/km)', 'service_type': 'Service Type'}
+                        )
+                    else:
+                        fig = px.bar(
+                            service_epkm,
+                            x='service_type',
+                            y='Epkm',
+                            color='service_type',
+                            labels={'Epkm': f'{metric_type} EPKM (₹/km)'}
+                        )
+                    
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis_title="Service Type",
+                        yaxis_title=f"{metric_type} EPKM (₹/km)",
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+            elif epkm_analysis_type == "Route Efficiency":
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    top_n = st.slider(
+                        "Number of Routes to Show",
+                        min_value=5,
+                        max_value=20,
+                        value=10,
+                        help="Select top N routes by EPKM"
+                    )
+                    
+                    efficiency_metric = st.selectbox(
+                        "Efficiency Metric",
+                        options=["EPKM per Passenger", "EPKM per Kilometer"],
+                        index=0
+                    )
+
+                with col2:
+                    route_stats = filtered_df.groupby('route_no').agg({
+                        'Epkm': 'mean',
+                        'total_count': 'mean',
+                        'travel_distance': 'mean'
+                    }).reset_index()
+                    
+                    if efficiency_metric == "EPKM per Passenger":
+                        route_stats['efficiency'] = route_stats['Epkm'] / route_stats['total_count']
+                        y_label = "EPKM per Passenger (₹/pax/km)"
+                    else:
+                        route_stats['efficiency'] = route_stats['Epkm'] 
+                        y_label = "EPKM (₹/km)"
+                    
+                    top_routes = route_stats.nlargest(top_n, 'efficiency')
+                    
+                    fig = px.bar(
+                        top_routes,
+                        x='route_no',
+                        y='efficiency',
+                        color='Epkm',
+                        color_continuous_scale='Viridis',
+                        labels={'route_no': 'Route Number', 'efficiency': y_label}
+                    )
+                    
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis_title="Route Number",
+                        yaxis_title=y_label,
+                        coloraxis_colorbar=dict(title="Avg EPKM")
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+            elif epkm_analysis_type == "Outlier Detection":
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    outlier_threshold = st.slider(
+                        "Outlier Threshold (Z-score)",
+                        min_value=2.0,
+                        max_value=5.0,
+                        value=3.0,
+                        step=0.5,
+                        help="Adjust sensitivity for outlier detection"
+                    )
+                    
+                    show_context = st.checkbox(
+                        "Show Contextual Data",
+                        value=True,
+                        help="Display non-outlier data points"
+                    )
+
+                with col2:
+                    # Calculate Z-scores
+                    filtered_df['epkm_zscore'] = np.abs(
+                        (filtered_df['Epkm'] - filtered_df['Epkm'].mean()) / filtered_df['Epkm'].std()
+                    )
+                    
+                    outliers = filtered_df[filtered_df['epkm_zscore'] > outlier_threshold]
+                    
+                    fig = px.scatter(
+                        filtered_df if show_context else outliers,
+                        x='running_date',
+                        y='Epkm',
+                        color='epkm_zscore',
+                        size='travel_distance',
+                        hover_data=['route_no', 'schedule_number', 'total_count'],
+                        color_continuous_scale='RdYlGn_r',
+                        labels={'Epkm': 'EPKM (₹/km)', 'running_date': 'Date'}
+                    )
+                    
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis_title="Date",
+                        yaxis_title="EPKM (₹/km)",
+                        coloraxis_colorbar=dict(title="Z-score")
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+
+        else:
+            st.markdown("""
+            <div style="text-align: center; padding: 40px; background-color: #f8f9fa; border-radius: 8px;">
+                <h4 style="color: #7f8c8d;">No data available for EPKM analysis</h4>
+                <p style="color: #bdc3c7;">Try adjusting your filter criteria</p>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # Export Option
